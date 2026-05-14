@@ -5,10 +5,43 @@ Medical imaging 3D visualization tool built on the FAST framework. Accepts any m
 
 **GitHub repo**: `ultrasound 3d visualizer` (ronithmenneni)
 
+## Implementation Status
+**COMPLETE** — All 5 stages implemented and tested (42/42 tests passing).
+
+### Project Structure
+```
+src/
+  loader.py        — Stage 1: detect_format, detect_anatomy, detect_dimensionality, load()
+  preprocessor.py  — Stage 2: preprocess() — grayscale, NLM denoise, normalize
+  inference.py     — Stage 3: run_inference(), compute_confidence(), _run_onnx()
+  visualizer.py    — Stage 4: visualize() — Mode 1/2/3 + helpers
+tests/
+  conftest.py      — fixtures: data_path, jugular_mhd_path, single_jpg_path, ball_mhd_path, gray arrays, binary_mask
+  test_loader.py   — 20 tests (format/anatomy/dimensionality detection + FAST loading)
+  test_preprocessor.py — 5 tests
+  test_inference.py    — 7 tests (includes ONNX integration)
+  test_visualizer.py   — 7 tests (Mode 1/2/3)
+  test_main.py         — 3 end-to-end integration tests
+main.py            — Stage 5: set ULTRASOUND_FILEPATH env var to change input
+requirements.txt   — pinned deps
+pytest.ini         — pythonpath = . (required for src imports)
+```
+
+### Running
+```bash
+source venv/bin/activate
+python main.py                              # default: JugularVein MHD
+ULTRASOUND_FILEPATH=/path/to/file.mhd python main.py
+ULTRASOUND_NO_BROWSER=1 python main.py    # suppress browser open
+pytest tests/                              # run all 42 tests
+```
+
+---
+
 ## Environment
 - **Python**: 3.13.3
 - **venv**: `venv/` in project root — always activate before running scripts
-- **Installed packages**: `pyfast 4.17.1`, `numpy 2.4.4`
+- **Installed packages**: `pyfast 4.17.1`, `numpy 2.4.4`, `plotly 6.7.0`, `scikit-image 0.26.0`, `opencv-python 4.13.0.92`, `matplotlib`, `pytest 9.0.3`
 - **Activate**: `source venv/bin/activate`
 
 ## FAST Data Path Configuration
@@ -176,6 +209,13 @@ for img, seg in fast.DataStream(streamer, segNetwork): ...
 ```
 
 ---
+
+## Known Quirks & Constraints
+- `SegmentationNetwork.create(model_path, scaleFactor=1.0)` works with float32 0-1 input (NOT `scaleFactor=1./255.`)
+- Ball 3D volume is 200×249×276 voxels — `_mode3_isosurface` downsamples to max 64 per axis (step=max/64) to keep HTML under ~10MB
+- ONNX CoreML warnings in stderr are non-fatal — output is still correct
+- Test suite writes to `ultrasoundviz_output.html` in the project root (last test to run is JPG, so it will contain "unknown" anatomy after pytest)
+- `pytest.ini` with `pythonpath = .` is required for `from src.loader import ...` to work
 
 ## Tutorial Scripts (`tutorial/`)
 29 scripts following the FAST Python Ultrasound Tutorial — used for framework exploration.
