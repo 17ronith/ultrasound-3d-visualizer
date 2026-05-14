@@ -61,13 +61,15 @@ def _mode1_surface(prob: np.ndarray, binary_mask: np.ndarray, anatomy: str, conf
     contours = find_contours(binary_mask.squeeze().astype(float), level=0.5)
     peak_z = float(z.max())
     color = _ring_color(anatomy)
-    for c in contours:
+    for i, c in enumerate(contours):
         fig.add_trace(go.Scatter3d(
             x=c[:, 1], y=c[:, 0],
             z=np.full(len(c), peak_z),
             mode='lines',
             line=dict(color=color, width=4),
             name='Structure Boundary',
+            legendgroup='boundary',
+            showlegend=(i == 0),
         ))
 
     coverage = conf.get('coverage', 'N/A')
@@ -96,6 +98,9 @@ def _mode1_surface(prob: np.ndarray, binary_mask: np.ndarray, anatomy: str, conf
 
 def _mode3_isosurface(data: np.ndarray, anatomy: str, conf: dict) -> go.Figure:
     vol = data.squeeze()          # (D, H, W)
+    # Downsample to max 64 voxels per axis to keep HTML under ~5MB
+    step = max(1, max(vol.shape) // 64)
+    vol = vol[::step, ::step, ::step]
     D, H, W = vol.shape
     z_idx, y_idx, x_idx = np.mgrid[0:D, 0:H, 0:W]
     values = vol.flatten().astype(np.float32)
