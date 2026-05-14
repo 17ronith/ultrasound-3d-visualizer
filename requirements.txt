@@ -1,0 +1,7 @@
+pyfast>=4.17.0
+numpy>=2.0
+plotly>=5.0
+scikit-image>=0.21
+matplotlib>=3.8
+opencv-python>=4.8
+pytest>=8.0
