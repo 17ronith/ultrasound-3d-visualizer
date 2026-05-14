@@ -69,3 +69,33 @@ def test_detect_dimensionality_video():
 
 def test_detect_dimensionality_dicom():
     assert detect_dimensionality('dicom', '/any/file.dcm') == '2D_sequence'
+
+
+import numpy as np
+from src.loader import load
+
+
+def test_load_single_jpg(single_jpg_path):
+    data, meta = load(single_jpg_path)
+    assert isinstance(data, np.ndarray)
+    assert data.ndim == 3           # (H, W, C)
+    assert meta['format'] == 'image'
+    assert meta['anatomy'] == 'unknown'
+    assert meta['dimensionality'] == '2D_single'
+
+
+def test_load_single_mhd(jugular_mhd_path):
+    data, meta = load(jugular_mhd_path)
+    assert isinstance(data, np.ndarray)
+    assert data.shape == (318, 492, 1)
+    assert meta['format'] == 'mhd'
+    assert meta['anatomy'] == 'JugularVein'
+    assert meta['dimensionality'] == '2D_single'
+
+
+def test_load_3d_mhd_sets_volume_dimensionality(ball_mhd_path):
+    data, meta = load(ball_mhd_path)
+    assert isinstance(data, np.ndarray)
+    assert data.ndim == 4           # (D, H, W, C)
+    assert meta['dimensionality'] == '3D_volume'
+    assert meta['anatomy'] == 'Ball'
