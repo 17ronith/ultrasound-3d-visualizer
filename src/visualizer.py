@@ -18,6 +18,35 @@ _RING_COLORS = {
 }
 _DEFAULT_RING_COLOR = 'white'
 
+_BADGE_COLORS = {
+    'JugularVein':   '#3b82f6',
+    'CarotidArtery': '#06b6d4',
+    'FemoralArtery': '#06b6d4',
+    'LIDC':          '#ef4444',
+    'Heart':         '#f97316',
+    'Ball':          '#10b981',
+}
+_DEFAULT_BADGE_COLOR = '#8b949e'
+
+
+def _badge_color(anatomy: str) -> str:
+    return _BADGE_COLORS.get(anatomy, _DEFAULT_BADGE_COLOR)
+
+
+def _pct_color(pct: float) -> str:
+    if pct >= 75:
+        return '#10b981'
+    elif pct >= 50:
+        return '#f97316'
+    return '#ef4444'
+
+
+def _parse_pct(s: str) -> float:
+    try:
+        return float(s.rstrip('%'))
+    except (ValueError, AttributeError):
+        return 0.0
+
 
 def _ring_color(anatomy: str) -> str:
     return _RING_COLORS.get(anatomy, _DEFAULT_RING_COLOR)
@@ -177,25 +206,204 @@ def _mode2_stacked(prob_list: list, binary_mask_list: list, anatomy: str, conf: 
     return fig
 
 
-def _build_html(left_b64: str, plotly_fig: go.Figure, conf: dict, anatomy: str) -> str:
+def _build_html(left_b64: str, plotly_fig: go.Figure, conf: dict, anatomy: str, metadata: dict = None) -> str:
     plotly_div = plotly_fig.to_html(full_html=False, include_plotlyjs='cdn')
-    coverage = conf.get('coverage', 'N/A')
-    mean_conf = conf.get('mean_confidence', 'N/A')
-    detected = conf.get('detected', 'N/A')
+    coverage = conf.get('coverage', '0.00%')
+    mean_conf = conf.get('mean_confidence', '0.00%')
+    detected = conf.get('detected', 'False')
+    fmt = (metadata or {}).get('format', '—').upper()
+    dim = (metadata or {}).get('dimensionality', '—')
+
+    badge_color = _badge_color(anatomy)
+    detected_color = '#10b981' if detected == 'True' else '#ef4444'
+    detected_text = '&#10003; Detected' if detected == 'True' else '&#10007; Not found'
+
+    cov_pct = _parse_pct(coverage)
+    conf_pct = _parse_pct(mean_conf)
+    cov_color = _pct_color(cov_pct)
+    conf_color = _pct_color(conf_pct)
 
     return f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>UltrasoundViz — {anatomy}</title></head>
-<body style="margin:0;padding:10px;background:#111111;display:flex;flex-direction:column;font-family:sans-serif;color:white">
-  <h2 style="margin:0 0 8px 0">UltrasoundViz | {anatomy} | detected={detected} | coverage={coverage} | confidence={mean_conf}</h2>
-  <div style="display:flex;gap:10px;flex:1">
-    <div style="flex:0.38;display:flex;align-items:center">
-      <img src="data:image/png;base64,{left_b64}" style="width:100%;border:1px solid #333">
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UltrasoundViz &mdash; {anatomy}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }}
+    .header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: #161b2e;
+      border-bottom: 1px solid #21262d;
+    }}
+    .brand {{
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 17px;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: 0.4px;
+    }}
+    .brand-sub {{ color: #8b949e; font-weight: 400; }}
+    .header-badges {{ display: flex; gap: 8px; align-items: center; }}
+    .badge {{
+      padding: 4px 11px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }}
+    .badge-anatomy {{
+      background: {badge_color}22;
+      color: {badge_color};
+      border: 1px solid {badge_color}55;
+    }}
+    .badge-format {{
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+    }}
+    .stats-row {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 16px 24px;
+    }}
+    .stat-card {{
+      background: #161b2e;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }}
+    .stat-label {{
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8b949e;
+      font-weight: 600;
+    }}
+    .stat-value {{
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.1;
+    }}
+    .stat-sub {{ font-size: 11px; color: #8b949e; margin-top: 2px; }}
+    .progress-bar {{
+      height: 3px;
+      background: #21262d;
+      border-radius: 2px;
+      margin-top: 10px;
+      overflow: hidden;
+    }}
+    .progress-fill {{ height: 100%; border-radius: 2px; }}
+    .main {{
+      display: flex;
+      gap: 16px;
+      flex: 1;
+      padding: 0 24px 16px;
+      min-height: 520px;
+    }}
+    .panel-2d {{
+      flex: 0 0 35%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }}
+    .panel-2d img {{
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #21262d;
+      display: block;
+    }}
+    .panel-caption {{
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+      padding: 7px 10px;
+      background: #161b2e;
+      border-radius: 6px;
+      border: 1px solid #21262d;
+    }}
+    .panel-3d {{ flex: 1; min-height: 480px; }}
+    .panel-3d > div {{ height: 480px !important; }}
+    .footer {{
+      padding: 10px 24px;
+      background: #161b2e;
+      border-top: 1px solid #21262d;
+      font-size: 11px;
+      color: #484f58;
+      display: flex;
+      justify-content: space-between;
+    }}
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="brand">UltrasoundViz <span class="brand-sub">/ medical imaging</span></div>
+    <div class="header-badges">
+      <span class="badge badge-anatomy">{anatomy}</span>
+      <span class="badge badge-format">{fmt} &middot; {dim}</span>
     </div>
-    <div style="flex:0.62">
+  </header>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Anatomy</div>
+      <div class="stat-value" style="font-size:20px;color:{badge_color}">{anatomy}</div>
+      <div class="stat-sub">{dim}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Detection</div>
+      <div class="stat-value" style="font-size:20px;color:{detected_color}">{detected_text}</div>
+      <div class="stat-sub">structure in scan</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Coverage</div>
+      <div class="stat-value" style="color:{cov_color}">{coverage}</div>
+      <div class="stat-sub">of image area</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:{min(cov_pct,100):.1f}%;background:{cov_color}"></div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Mean Confidence</div>
+      <div class="stat-value" style="color:{conf_color}">{mean_conf}</div>
+      <div class="stat-sub">model certainty</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:{min(conf_pct,100):.1f}%;background:{conf_color}"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="panel-2d">
+      <img src="data:image/png;base64,{left_b64}" alt="Original scan with segmentation overlay">
+      <div class="panel-caption">Original &middot; {anatomy} &middot; segmentation overlay</div>
+    </div>
+    <div class="panel-3d">
       {plotly_div}
     </div>
   </div>
+
+  <footer class="footer">
+    <span>UltrasoundViz &middot; {anatomy} &middot; {dim}</span>
+    <span>Interactive 3D &mdash; rotate &middot; zoom &middot; hover for details</span>
+  </footer>
 </body>
 </html>"""
 
@@ -208,7 +416,7 @@ def visualize(orig: np.ndarray, probability_map, binary_mask, conf: dict, metada
         orig_single = orig if not isinstance(orig, list) else orig[0]
         left_b64 = _make_left_panel_b64(orig_single, binary_mask, anatomy)
         fig = _mode1_surface(probability_map, binary_mask, anatomy, conf)
-        return _build_html(left_b64, fig, conf, anatomy)
+        return _build_html(left_b64, fig, conf, anatomy, metadata)
 
     if dim == '3D_volume':
         mid_d = orig.shape[0] // 2
@@ -216,7 +424,7 @@ def visualize(orig: np.ndarray, probability_map, binary_mask, conf: dict, metada
         empty_mask = np.zeros(mid_frame.shape[:2] + (1,), dtype=np.uint8)
         left_b64 = _make_left_panel_b64(mid_frame, empty_mask, anatomy)
         fig = _mode3_isosurface(orig, anatomy, conf)
-        return _build_html(left_b64, fig, conf, anatomy)
+        return _build_html(left_b64, fig, conf, anatomy, metadata)
 
     if dim == '2D_sequence':
         if isinstance(probability_map, list):
@@ -228,6 +436,6 @@ def visualize(orig: np.ndarray, probability_map, binary_mask, conf: dict, metada
         orig_list = orig if isinstance(orig, list) else [orig]
         left_b64 = _make_left_panel_b64(orig_list[0], mask_list[0], anatomy)
         fig = _mode2_stacked(prob_list, mask_list, anatomy, conf)
-        return _build_html(left_b64, fig, conf, anatomy)
+        return _build_html(left_b64, fig, conf, anatomy, metadata)
 
     raise ValueError(f'Unknown dimensionality: {dim}')
