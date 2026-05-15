@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UltrasoundViz</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Drop Zone ────────────────────────────────── */
+    #state-drop {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .drop-brand {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: 0.5px;
+      margin-bottom: 24px;
+      opacity: 0.7;
+    }
+
+    .drop-zone {
+      width: 460px;
+      height: 300px;
+      border: 2px dashed #2d3748;
+      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      padding: 40px;
+      text-align: center;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: #3b82f6;
+      background: rgba(59,130,246,0.04);
+    }
+
+    .drop-icon {
+      width: 56px;
+      height: 56px;
+      border: 2px solid #2d3748;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      color: #8b949e;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .drop-zone:hover .drop-icon, .drop-zone.drag-over .drop-icon {
+      border-color: #3b82f6;
+      color: #58a6ff;
+    }
+
+    .drop-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: #c9d1d9;
+    }
+
+    .drop-sub {
+      font-size: 13px;
+      color: #8b949e;
+      line-height: 1.6;
+    }
+
+    .drop-formats {
+      font-size: 11px;
+      color: #484f58;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 0.8px;
+      margin-top: 4px;
+    }
+
+    /* ── Loading ──────────────────────────────────── */
+    #state-loading {
+      height: 100vh;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .loading-brand {
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      color: #58a6ff;
+      margin-bottom: 8px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #21262d;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-status {
+      font-size: 13px;
+      color: #8b949e;
+      min-height: 18px;
+      letter-spacing: 0.2px;
+    }
+
+    /* ── Dashboard ────────────────────────────────── */
+    #state-dashboard {
+      height: 100vh;
+      display: none;
+      flex-direction: column;
+    }
+
+    .dash-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 20px;
+      background: #161b2e;
+      border-bottom: 1px solid #21262d;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+
+    .brand-sub { color: #8b949e; font-weight: 400; }
+
+    .header-badges { display: flex; gap: 7px; align-items: center; }
+
+    .badge {
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 10px 20px;
+      flex-shrink: 0;
+    }
+
+    .stat-card {
+      background: #161b2e;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 11px 14px;
+    }
+
+    .stat-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #8b949e;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .stat-value { font-size: 21px; font-weight: 700; line-height: 1.1; }
+
+    .stat-sub { font-size: 10px; color: #8b949e; margin-top: 2px; }
+
+    .progress-bar {
+      height: 3px;
+      background: #21262d;
+      border-radius: 2px;
+      margin-top: 7px;
+      overflow: hidden;
+    }
+
+    .progress-fill { height: 100%; border-radius: 2px; }
+
+    .main-panels {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      padding: 0 20px;
+      gap: 14px;
+    }
+
+    .panel-left {
+      flex: 0 0 50%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding-bottom: 12px;
+    }
+
+    #scan-canvas {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      border-radius: 8px;
+      border: 1px solid #21262d;
+      display: block;
+    }
+
+    .panel-right {
+      flex: 1;
+      position: relative;
+      border-radius: 8px;
+      border: 1px solid #21262d;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    #three-container {
+      position: absolute;
+      inset: 0;
+    }
+
+    .dash-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 20px;
+      background: #161b2e;
+      border-top: 1px solid #21262d;
+      flex-shrink: 0;
+    }
+
+    .footer-info { font-size: 11px; color: #484f58; }
+
+    .btn-load-new {
+      padding: 5px 14px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .btn-load-new:hover { background: #2d333b; border-color: #58a6ff; }
+
+    /* ── Error toast ──────────────────────────────── */
+    #error-toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e1010;
+      border: 1px solid #ef444455;
+      color: #f87171;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+      z-index: 999;
+      max-width: 80vw;
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.min.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+<!-- ── State 1: Drop Zone ─────────────────────────────────────────────────── -->
+<div id="state-drop">
+  <div class="drop-brand">UltrasoundViz / medical imaging</div>
+  <div class="drop-zone" id="drop-zone">
+    <div class="drop-icon">⊕</div>
+    <div class="drop-title">Drop any ultrasound file</div>
+    <div class="drop-sub">
+      Drag and drop or click to browse<br>
+      Runs the full AI segmentation pipeline
+    </div>
+    <div class="drop-formats">MHD · JPG · PNG · BMP · DCM · AVI · MP4</div>
+    <input type="file" id="file-input" style="display:none"
+           accept=".mhd,.jpg,.jpeg,.png,.bmp,.dcm,.avi,.mp4">
+  </div>
+</div>
+
+<!-- ── State 2: Loading ───────────────────────────────────────────────────── -->
+<div id="state-loading">
+  <div class="loading-brand">UltrasoundViz</div>
+  <div class="spinner"></div>
+  <div class="loading-status" id="loading-status">Initializing…</div>
+</div>
+
+<!-- ── State 3: Dashboard ─────────────────────────────────────────────────── -->
+<div id="state-dashboard">
+  <header class="dash-header">
+    <div class="brand">UltrasoundViz <span class="brand-sub">/ medical imaging</span></div>
+    <div class="header-badges" id="header-badges"></div>
+  </header>
+
+  <div class="stats-row" id="stats-row"></div>
+
+  <div class="main-panels">
+    <div class="panel-left">
+      <canvas id="scan-canvas"></canvas>
+    </div>
+    <div class="panel-right">
+      <div id="three-container"></div>
+    </div>
+  </div>
+
+  <footer class="dash-footer">
+    <span class="footer-info" id="footer-info"></span>
+    <button class="btn-load-new" id="btn-load-new">← Load new file</button>
+  </footer>
+</div>
+
+<!-- ── Error toast ────────────────────────────────────────────────────────── -->
+<div id="error-toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── Config ───────────────────────────────────────────────────────────────────
+
+const API = 'http://localhost:8000/analyze';
+
+const BADGE = {
+  JugularVein:   { bg:'#3b82f622', text:'#3b82f6', border:'#3b82f655', rgb:[59,130,246] },
+  CarotidArtery: { bg:'#06b6d422', text:'#06b6d4', border:'#06b6d455', rgb:[6,182,212] },
+  FemoralArtery: { bg:'#06b6d422', text:'#06b6d4', border:'#06b6d455', rgb:[6,182,212] },
+  LIDC:          { bg:'#ef444422', text:'#ef4444', border:'#ef444455', rgb:[239,68,68] },
+  Heart:         { bg:'#f9731622', text:'#f97316', border:'#f9731655', rgb:[249,115,22] },
+  Ball:          { bg:'#10b98122', text:'#10b981', border:'#10b98155', rgb:[16,185,129] },
+};
+const DEFAULT_BADGE = { bg:'#8b949e22', text:'#8b949e', border:'#8b949e55', rgb:[139,148,158] };
+const badgeFor = a => BADGE[a] || DEFAULT_BADGE;
+const pctColor = v => v >= 75 ? '#10b981' : v >= 50 ? '#f97316' : '#ef4444';
+const parsePct = s => parseFloat((s||'0').replace('%','')) || 0;
+
+// ── Three.js state ────────────────────────────────────────────────────────────
+
+let _renderer = null, _animId = null, _resizeObs = null;
+
+function teardownThree() {
+  if (_animId)    { cancelAnimationFrame(_animId); _animId = null; }
+  if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
+  if (_renderer)  { _renderer.dispose(); _renderer = null; }
+  const c = document.getElementById('three-container');
+  if (c) c.innerHTML = '';
+}
+
+// ── State machine ─────────────────────────────────────────────────────────────
+
+function showState(s) {
+  document.getElementById('state-drop').style.display      = s === 'drop'      ? 'flex' : 'none';
+  document.getElementById('state-loading').style.display   = s === 'loading'   ? 'flex' : 'none';
+  document.getElementById('state-dashboard').style.display = s === 'dashboard' ? 'flex' : 'none';
+}
+
+function setStatus(msg) { document.getElementById('loading-status').textContent = msg; }
+
+function showError(msg) {
+  const el = document.getElementById('error-toast');
+  el.textContent = '✕  ' + msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
+  showState('drop');
+}
+
+// ── File input ────────────────────────────────────────────────────────────────
+
+document.getElementById('drop-zone').addEventListener('click', () =>
+  document.getElementById('file-input').click());
+
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+document.getElementById('btn-load-new').addEventListener('click', () => {
+  teardownThree();
+  document.getElementById('file-input').value = '';
+  showState('drop');
+});
+
+// ── Upload & analyze ──────────────────────────────────────────────────────────
+
+async function handleFile(file) {
+  showState('loading');
+
+  const msgs = ['Detecting format…', 'Running preprocessing…', 'Running inference…'];
+  let i = 0;
+  setStatus(msgs[i]);
+  const ticker = setInterval(() => { i = (i + 1) % msgs.length; setStatus(msgs[i]); }, 900);
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(API, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
+    const data = await res.json();
+    clearInterval(ticker);
+    setStatus('Rendering 3D…');
+    await new Promise(r => setTimeout(r, 200));
+    showDashboard(data);
+  } catch (err) {
+    clearInterval(ticker);
+    showError(err.message);
+  }
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+function showDashboard(data) {
+  showState('dashboard');
+  renderHeader(data);
+  renderStats(data);
+  renderCanvas(data);
+  renderTerrain(data);
+  document.getElementById('footer-info').textContent =
+    `${data.anatomy} · ${data.dimensionality} · rotate · zoom · pan`;
+}
+
+function renderHeader(data) {
+  const c = badgeFor(data.anatomy);
+  document.getElementById('header-badges').innerHTML =
+    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">${data.anatomy}</span>
+     <span class="badge" style="background:#21262d;color:#8b949e;border:1px solid #30363d;
+       font-family:'Courier New',monospace;font-size:10px">
+       ${data.format.toUpperCase()} &middot; ${data.dimensionality}
+     </span>`;
+}
+
+function renderStats(data) {
+  const c = badgeFor(data.anatomy);
+  const detColor = data.detected ? '#10b981' : '#ef4444';
+  const detText  = data.detected ? '&#10003; Detected' : '&#10007; Not found';
+  const covPct   = parsePct(data.coverage);
+  const confPct  = parsePct(data.mean_confidence);
+  const covColor  = pctColor(covPct);
+  const confColor = pctColor(confPct);
+
+  document.getElementById('stats-row').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Anatomy</div>
+      <div class="stat-value" style="font-size:17px;color:${c.text}">${data.anatomy}</div>
+      <div class="stat-sub">${data.dimensionality}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Detection</div>
+      <div class="stat-value" style="font-size:16px;color:${detColor}">${detText}</div>
+      <div class="stat-sub">structure in scan</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Coverage</div>
+      <div class="stat-value" style="color:${covColor}">${data.coverage}</div>
+      <div class="stat-sub">of image area</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${Math.min(covPct,100)}%;background:${covColor}"></div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Mean Confidence</div>
+      <div class="stat-value" style="color:${confColor}">${data.mean_confidence}</div>
+      <div class="stat-sub">model certainty</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${Math.min(confPct,100)}%;background:${confColor}"></div>
+      </div>
+    </div>`;
+}
+
+// ── Canvas (left panel) ───────────────────────────────────────────────────────
+
+function renderCanvas(data) {
+  const canvas = document.getElementById('scan-canvas');
+  const parent = canvas.parentElement;
+  const cW = parent.clientWidth  || 400;
+  const cH = parent.clientHeight || 400;
+  canvas.width  = cW;
+  canvas.height = cH;
+
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, cW, cH);
+
+  const img = new Image();
+  img.onload = () => {
+    // Fit-contain
+    const scale = Math.min(cW / img.width, cH / img.height);
+    const dw = Math.round(img.width  * scale);
+    const dh = Math.round(img.height * scale);
+    const ox = Math.round((cW - dw) / 2);
+    const oy = Math.round((cH - dh) / 2);
+    ctx.drawImage(img, ox, oy, dw, dh);
+
+    const mask = data.binary_mask;
+    const rows = mask.length, cols = mask[0].length;
+    const [r, g, b] = badgeFor(data.anatomy).rgb;
+
+    // Offscreen at mask resolution: filled overlay + bright contour
+    const off = document.createElement('canvas');
+    off.width = cols; off.height = rows;
+    const octx = off.getContext('2d');
+
+    // Semi-transparent fill
+    const fill = octx.createImageData(cols, rows);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (!mask[y][x]) continue;
+        const i = (y * cols + x) * 4;
+        fill.data[i]=r; fill.data[i+1]=g; fill.data[i+2]=b; fill.data[i+3]=80;
+      }
+    }
+    octx.putImageData(fill, 0, 0);
+    ctx.drawImage(off, ox, oy, dw, dh);
+
+    // Bright contour outline
+    const contour = octx.createImageData(cols, rows);
+    for (let y = 1; y < rows - 1; y++) {
+      for (let x = 1; x < cols - 1; x++) {
+        if (!mask[y][x]) continue;
+        if (!mask[y-1][x] || !mask[y+1][x] || !mask[y][x-1] || !mask[y][x+1]) {
+          const i = (y * cols + x) * 4;
+          contour.data[i]=r; contour.data[i+1]=g; contour.data[i+2]=b; contour.data[i+3]=230;
+        }
+      }
+    }
+    octx.clearRect(0, 0, cols, rows);
+    octx.putImageData(contour, 0, 0);
+    ctx.drawImage(off, ox, oy, dw, dh);
+  };
+  img.src = 'data:image/png;base64,' + data.original_image;
+}
+
+// ── Three.js terrain (right panel) ───────────────────────────────────────────
+
+// Matplotlib 'hot' colormap: black → red → orange/yellow → white
+function hotColor(t) {
+  t = Math.max(0, Math.min(1, t));
+  let r, g, b;
+  if (t < 0.365) {
+    r = t / 0.365; g = 0; b = 0;
+  } else if (t < 0.745) {
+    r = 1; g = (t - 0.365) / 0.38; b = 0;
+  } else {
+    r = 1; g = 1; b = (t - 0.745) / 0.255;
+  }
+  return [r, g, b];
+}
+
+function renderTerrain(data) {
+  teardownThree();
+
+  const container = document.getElementById('three-container');
+  const W = container.clientWidth  || 600;
+  const H = container.clientHeight || 400;
+
+  const probMap = data.probability_map;
+  const mask    = data.binary_mask;
+  const rows    = probMap.length;
+  const cols    = probMap[0].length;
+
+  // Scene & renderer
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+  _renderer = renderer;
+
+  const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+
+  // Terrain geometry in XZ plane, Y = height
+  const scaleX     = cols;
+  const scaleZ     = rows;
+  const heightScale = Math.max(cols, rows) * 0.35;
+
+  const positions = new Float32Array(rows * cols * 3);
+  const colors    = new Float32Array(rows * cols * 3);
+  const indices   = [];
+  let maxH = 0;
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const v   = probMap[row][col];
+      const h   = v * heightScale;
+      if (h > maxH) maxH = h;
+      const idx = (row * cols + col) * 3;
+      positions[idx]   = (col / (cols - 1) - 0.5) * scaleX;
+      positions[idx+1] = h;
+      positions[idx+2] = (row / (rows - 1) - 0.5) * scaleZ;
+      const [r,g,b] = hotColor(v);
+      colors[idx]=r; colors[idx+1]=g; colors[idx+2]=b;
+    }
+  }
+
+  for (let row = 0; row < rows - 1; row++) {
+    for (let col = 0; col < cols - 1; col++) {
+      const tl = row * cols + col;
+      indices.push(tl, tl+cols, tl+1, tl+1, tl+cols, tl+cols+1);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+    roughness: 0.75,
+    metalness: 0.1,
+  })));
+
+  // Boundary contour as LineSegments at peak height
+  const linePos = [];
+  const contourY = maxH + heightScale * 0.03;
+  const xStep = scaleX / (cols - 1);
+  const zStep = scaleZ / (rows - 1);
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const here = mask[row][col];
+      // vertical edge (right neighbour differs)
+      if (col + 1 < cols && mask[row][col+1] !== here) {
+        const x  = (col / (cols-1) - 0.5) * scaleX + xStep * 0.5;
+        const z0 = (row / (rows-1) - 0.5) * scaleZ;
+        linePos.push(x, contourY, z0,  x, contourY, z0 + zStep);
+      }
+      // horizontal edge (bottom neighbour differs)
+      if (row + 1 < rows && mask[row+1][col] !== here) {
+        const z  = (row / (rows-1) - 0.5) * scaleZ + zStep * 0.5;
+        const x0 = (col / (cols-1) - 0.5) * scaleX;
+        linePos.push(x0, contourY, z,  x0 + xStep, contourY, z);
+      }
+    }
+  }
+
+  if (linePos.length > 0) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
+    const lineColor = new THREE.Color(badgeFor(data.anatomy).text);
+    scene.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: lineColor })));
+  }
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0x555555, 1.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+  sun.position.set(scaleX * 0.6, heightScale * 2.5, scaleZ * 0.3);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0x2244aa, 0.4);
+  fill.position.set(-scaleX * 0.5, heightScale, -scaleZ * 0.5);
+  scene.add(fill);
+
+  // Camera: 45° above terrain looking at centre
+  const camDist = Math.max(scaleX, scaleZ) * 1.1;
+  camera.position.set(camDist * 0.75, maxH + heightScale * 0.9, camDist * 0.75);
+  const target = new THREE.Vector3(0, maxH * 0.25, 0);
+  camera.lookAt(target);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.copy(target);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.minDistance = 10;
+  controls.maxDistance = camDist * 4;
+  controls.update();
+
+  // Resize observer
+  _resizeObs = new ResizeObserver(() => {
+    const nW = container.clientWidth;
+    const nH = container.clientHeight;
+    if (!nW || !nH) return;
+    camera.aspect = nW / nH;
+    camera.updateProjectionMatrix();
+    renderer.setSize(nW, nH);
+  });
+  _resizeObs.observe(container);
+
+  // Render loop
+  function animate() {
+    _animId = requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+window.__handleFile = handleFile;
+</script>
+</body>
+</html>

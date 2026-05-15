@@ -1,12 +1,16 @@
 # UltrasoundViz — Project Context
 
 ## Overview
-Medical imaging 3D visualization tool built on the FAST framework. Accepts any medical imaging file, runs anatomy-aware AI segmentation, and renders an interactive 3D visualization in the browser via Plotly.
+Medical imaging 3D visualization tool built on the FAST framework. Accepts any medical imaging file, runs anatomy-aware AI segmentation, and renders an interactive 3D terrain visualization in the browser.
+
+Two modes of use:
+- **Web app** (`server.py` + `index.html`): upload any file via browser, see live Three.js terrain
+- **CLI** (`main.py`): run on a local file, opens a Plotly HTML report
 
 **GitHub repo**: `ultrasound 3d visualizer` (ronithmenneni)
 
 ## Implementation Status
-**COMPLETE** — All 5 stages implemented and tested (42/42 tests passing).
+**COMPLETE** — All 5 stages implemented and tested (42/42 tests passing). Web app fully verified with Playwright.
 
 ### Project Structure
 ```
@@ -14,7 +18,10 @@ src/
   loader.py        — Stage 1: detect_format, detect_anatomy, detect_dimensionality, load()
   preprocessor.py  — Stage 2: preprocess() — grayscale, NLM denoise, normalize
   inference.py     — Stage 3: run_inference(), compute_confidence(), _run_onnx()
-  visualizer.py    — Stage 4: visualize() — Mode 1/2/3 + helpers
+  visualizer.py    — Stage 4: visualize() — Mode 1/2/3 + helpers (Plotly, used by CLI)
+server.py          — FastAPI backend: GET / (serves index.html), POST /analyze (full pipeline)
+index.html         — Single-file web frontend: drop zone → loading → dashboard w/ Three.js terrain
+start.sh           — Starts the web app: activates venv + uvicorn server:app --port 8000 --reload
 tests/
   conftest.py      — fixtures: data_path, jugular_mhd_path, single_jpg_path, ball_mhd_path, gray arrays, binary_mask
   test_loader.py   — 20 tests (format/anatomy/dimensionality detection + FAST loading)
@@ -22,26 +29,38 @@ tests/
   test_inference.py    — 7 tests (includes ONNX integration)
   test_visualizer.py   — 7 tests (Mode 1/2/3)
   test_main.py         — 3 end-to-end integration tests
-main.py            — Stage 5: set ULTRASOUND_FILEPATH env var to change input
-requirements.txt   — pinned deps
+main.py            — CLI: set ULTRASOUND_FILEPATH env var to change input
+requirements.txt   — pinned deps (includes fastapi, uvicorn, python-multipart, Pillow)
 pytest.ini         — pythonpath = . (required for src imports)
 ```
 
 ### Running
 ```bash
+# Web app (recommended)
+bash start.sh                               # serves at http://localhost:8000
+
+# CLI (Plotly HTML report)
 source venv/bin/activate
 python main.py                              # default: JugularVein MHD
 ULTRASOUND_FILEPATH=/path/to/file.mhd python main.py
 ULTRASOUND_NO_BROWSER=1 python main.py    # suppress browser open
+
+# Tests
 pytest tests/                              # run all 42 tests
 ```
+
+## Web App Architecture
+- **`server.py`**: FastAPI app. `POST /analyze` accepts any image file, runs the full pipeline (load → preprocess → inference), returns JSON with `anatomy`, `dimensionality`, `format`, `detected`, `coverage`, `mean_confidence`, `probability_map` (blended terrain Z ≤200×200), `binary_mask`, `original_image` (base64 PNG).
+- **`index.html`**: Three-state SPA (drop / loading / dashboard). Uses Three.js 0.165.0 via importmap (cdn.jsdelivr.net). `renderTerrain()` builds a custom BufferGeometry with hot colormap vertex colors (black→red→yellow→white) and `LineSegments` for the boundary ring. `renderCanvas()` draws the original image with a mask fill overlay. `teardownThree()` cleans up renderer + ResizeObserver on "Load new file".
+- **Terrain blending**: Z = 0.35 × raw_grayscale_norm + 0.65 × gaussian_blurred_mask (σ=15), giving smooth hills instead of binary cylinders. Same formula used in both server.py and visualizer.py Mode 1.
+- **`window.__handleFile`**: exposed in the module for Playwright testing; not used in production flow.
 
 ---
 
 ## Environment
 - **Python**: 3.13.3
 - **venv**: `venv/` in project root — always activate before running scripts
-- **Installed packages**: `pyfast 4.17.1`, `numpy 2.4.4`, `plotly 6.7.0`, `scikit-image 0.26.0`, `opencv-python 4.13.0.92`, `matplotlib`, `pytest 9.0.3`
+- **Installed packages**: `pyfast 4.17.1`, `numpy 2.4.4`, `plotly 6.7.0`, `scikit-image 0.26.0`, `opencv-python 4.13.0.92`, `matplotlib`, `pytest 9.0.3`, `fastapi`, `uvicorn`, `python-multipart`, `Pillow 12.2.0`
 - **Activate**: `source venv/bin/activate`
 
 ## FAST Data Path Configuration
