@@ -7,6 +7,7 @@ matplotlib.use('Agg')  # non-interactive backend — no display needed
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from skimage.measure import find_contours
+from scipy.ndimage import gaussian_filter
 
 _RING_COLORS = {
     'JugularVein':   'blue',
@@ -73,8 +74,16 @@ def _make_left_panel_b64(orig: np.ndarray, binary_mask: np.ndarray, anatomy: str
     return b64
 
 
-def _mode1_surface(prob: np.ndarray, binary_mask: np.ndarray, anatomy: str, conf: dict) -> go.Figure:
-    z = prob.squeeze()
+def _mode1_surface(prob: np.ndarray, binary_mask: np.ndarray, anatomy: str, conf: dict, orig: np.ndarray = None) -> go.Figure:
+    if orig is not None:
+        o = orig.astype(np.float32) / 255.0
+        raw = o.mean(axis=-1) if o.ndim == 3 else o.squeeze()
+    else:
+        raw = prob.squeeze()
+    blurred = gaussian_filter(binary_mask.squeeze().astype(np.float32), sigma=15)
+    if blurred.max() > 0:
+        blurred /= blurred.max()
+    z = 0.35 * raw + 0.65 * blurred
     H, W = z.shape
     x = np.arange(W)
     y = np.arange(H)
@@ -111,7 +120,7 @@ def _mode1_surface(prob: np.ndarray, binary_mask: np.ndarray, anatomy: str, conf
         scene=dict(
             xaxis_title='Width',
             yaxis_title='Height',
-            zaxis_title='Probability',
+            zaxis_title='Height',
             bgcolor='#111111',
             xaxis=dict(color='white'),
             yaxis=dict(color='white'),
@@ -415,7 +424,7 @@ def visualize(orig: np.ndarray, probability_map, binary_mask, conf: dict, metada
     if dim == '2D_single':
         orig_single = orig if not isinstance(orig, list) else orig[0]
         left_b64 = _make_left_panel_b64(orig_single, binary_mask, anatomy)
-        fig = _mode1_surface(probability_map, binary_mask, anatomy, conf)
+        fig = _mode1_surface(probability_map, binary_mask, anatomy, conf, orig_single)
         return _build_html(left_b64, fig, conf, anatomy, metadata)
 
     if dim == '3D_volume':
