@@ -1,7 +1,9 @@
 import os
 import io
 import base64
+import shutil
 import tempfile
+from typing import List
 
 import numpy as np
 from PIL import Image as PILImage
@@ -36,13 +38,28 @@ async def index():
 
 
 @app.post('/analyze')
-async def analyze(file: UploadFile = File(...)):
-    suffix = os.path.splitext(file.filename or 'upload')[1] or '.tmp'
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
+async def analyze(files: List[UploadFile] = File(...)):
+    # Save all uploaded files to the same temp directory so that .mhd can
+    # find its companion .raw file (both must live in the same folder).
+    tmp_dir = tempfile.mkdtemp()
+    mhd_path = None
+    first_path = None
 
     try:
+        for f in files:
+            fname = os.path.basename(f.filename or 'upload')
+            if not fname or fname == '.':
+                fname = 'upload'
+            fpath = os.path.join(tmp_dir, fname)
+            with open(fpath, 'wb') as out:
+                out.write(await f.read())
+            if first_path is None:
+                first_path = fpath
+            if fname.lower().endswith('.mhd'):
+                mhd_path = fpath
+
+        tmp_path = mhd_path or first_path
+
         data, meta = load(tmp_path)
         preprocessed = preprocess(data, meta)
 
@@ -115,5 +132,4 @@ async def analyze(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
