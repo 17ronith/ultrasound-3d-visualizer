@@ -1,22 +1,29 @@
 import os
 import io
+import re
 import base64
 import shutil
 import tempfile
-from typing import List
+import json
+import time
+from pathlib import Path
+from typing import List, Optional
 
 import numpy as np
 from PIL import Image as PILImage
 from scipy.ndimage import gaussian_filter
+from scipy.signal import find_peaks
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+
+from skimage.filters import threshold_otsu
 
 import fast
 fast.Config.setTestDataPath('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
 
-from src.loader import load
+from src.loader import load, detect_sequence
 from src.preprocessor import preprocess
 from src.inference import run_inference
 
@@ -37,13 +44,56 @@ async def index():
         return f.read()
 
 
+_OVERRIDE_TO_ROUTE = {
+    'Jugular Vein': 'JugularVein',
+    'Lung / CT':    'LIDC',
+}
+
+_FAST_DATA_ROOT = Path('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
+
+def _find_sequence_dir(filename: str, uploaded_path: str = '') -> tuple[bool, str]:
+    """Search FAST data for a numbered MHD file and return its directory if it is
+    part of a sequence (sibling numbered MHDs + timestamps.fts present).
+
+    When multiple directories contain the same filename (e.g. US-2D_0.mhd), the
+    uploaded file's content is compared byte-for-byte against each candidate to
+    identify the correct source directory.
+    """
+    if not filename.lower().endswith('.mhd'):
+        return False, ''
+
+    uploaded_bytes: bytes | None = None
+    if uploaded_path:
+        try:
+            uploaded_bytes = Path(uploaded_path).read_bytes()
+        except OSError:
+            pass
+
+    for candidate in _FAST_DATA_ROOT.rglob(filename):
+        d = candidate.parent
+        if not (d / 'timestamps.fts').exists():
+            continue
+        siblings = [p for p in d.glob('*.mhd') if re.search(r'_(\d+)$', p.stem)]
+        if len(siblings) <= 1:
+            continue
+        # If we have the uploaded bytes, confirm this is the right candidate
+        if uploaded_bytes is not None:
+            try:
+                if candidate.read_bytes() != uploaded_bytes:
+                    continue
+            except OSError:
+                continue
+        return True, str(d)
+    return False, ''
+
 @app.post('/analyze')
-async def analyze(files: List[UploadFile] = File(...)):
+async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optional[str] = Form(None)):
     # Save all uploaded files to the same temp directory so that .mhd can
     # find its companion .raw file (both must live in the same folder).
     tmp_dir = tempfile.mkdtemp()
     mhd_path = None
     first_path = None
+    saved_paths = []
 
     try:
         for f in files:
@@ -53,6 +103,7 @@ async def analyze(files: List[UploadFile] = File(...)):
             fpath = os.path.join(tmp_dir, fname)
             with open(fpath, 'wb') as out:
                 out.write(await f.read())
+            saved_paths.append(fpath)
             if first_path is None:
                 first_path = fpath
             if fname.lower().endswith('.mhd'):
@@ -60,13 +111,50 @@ async def analyze(files: List[UploadFile] = File(...)):
 
         tmp_path = mhd_path or first_path
 
-        data, meta = load(tmp_path)
+        # Sequence detection for mode_select UI
+        _uploaded_mhd = mhd_path or first_path or ''
+        _uploaded_fname = os.path.basename(_uploaded_mhd)
+        _has_seq, _seq_dir = _find_sequence_dir(_uploaded_fname, _uploaded_mhd)
+
+        # Companion extensions that pair with .mhd — not independent frames
+        _companion = {'.mhd', '.raw', '.zraw'}
+        data_paths = [p for p in saved_paths if Path(p).suffix.lower() not in _companion]
+
+        seq_result = None
+        if len(data_paths) > 1 and mhd_path is None:
+            seq_result = detect_sequence(data_paths)
+            if seq_result['is_sequential']:
+                frames, ref_meta = [], None
+                for p in seq_result['ordered_paths']:
+                    frame_data, frame_meta = load(p)
+                    if ref_meta is None:
+                        ref_meta = frame_meta
+                    frames.append(np.array(frame_data))
+                data = frames
+                meta = ref_meta
+                meta['dimensionality'] = '2D_sequence'
+            else:
+                data, meta = load(tmp_path)
+        else:
+            data, meta = load(tmp_path)
+
+        if anatomy_override and anatomy_override.strip():
+            route_key = _OVERRIDE_TO_ROUTE.get(anatomy_override, anatomy_override)
+            meta['anatomy'] = route_key
+            display_anatomy = anatomy_override
+        else:
+            display_anatomy = meta['anatomy']
         preprocessed = preprocess(data, meta)
 
         if isinstance(preprocessed, list):
-            results = [run_inference(frame, meta) for frame in preprocessed]
-            prob_map, bin_mask, conf = results[0]
-            orig = data[0] if isinstance(data, list) else data
+            mid_idx = len(preprocessed) // 2
+            if meta['format'] == 'dicom':
+                prob_map, bin_mask, conf = run_inference(preprocessed[mid_idx], meta)
+                orig = data[mid_idx] if isinstance(data, list) else data
+            else:
+                results = [run_inference(frame, meta) for frame in preprocessed]
+                prob_map, bin_mask, conf = results[0]
+                orig = data[0] if isinstance(data, list) else data
         else:
             prob_map, bin_mask, conf = run_inference(preprocessed, meta)
             orig = data
@@ -83,6 +171,22 @@ async def analyze(files: List[UploadFile] = File(...)):
             orig_gray = orig_arr.squeeze(-1).astype(np.uint8)
         else:
             orig_gray = orig_arr.astype(np.uint8)
+
+        # DICOM: Otsu foreground/background split + 85th-percentile structure detection
+        if meta['format'] == 'dicom':
+            otsu_val = threshold_otsu(orig_gray)
+            foreground = orig_gray > otsu_val
+            fg_pixels = orig_gray[foreground]
+            p85 = float(np.percentile(fg_pixels, 85)) if len(fg_pixels) > 0 else 255.0
+            dicom_prob = np.zeros(orig_gray.shape, dtype=np.float32)
+            low_fg = foreground & (orig_gray <= p85)
+            high_fg = foreground & (orig_gray > p85)
+            dicom_prob[low_fg] = 0.1 + 0.2 * (orig_gray[low_fg].astype(np.float32) / p85)
+            high_range = max(255.0 - p85, 1.0)
+            dicom_prob[high_fg] = 0.7 + 0.3 * (
+                (orig_gray[high_fg].astype(np.float32) - p85) / high_range
+            )
+            bin_mask = (dicom_prob > 0.5)[..., np.newaxis].astype(np.uint8)
 
         # Blended terrain Z (same formula as visualizer.py Mode 1)
         raw_norm = orig_gray.astype(np.float32) / 255.0
@@ -118,7 +222,7 @@ async def analyze(files: List[UploadFile] = File(...)):
         orig_b64 = base64.b64encode(buf.getvalue()).decode()
 
         return {
-            'anatomy': meta['anatomy'],
+            'anatomy': display_anatomy,
             'dimensionality': meta['dimensionality'],
             'format': meta['format'],
             'detected': conf['detected'] == 'True',
@@ -127,6 +231,11 @@ async def analyze(files: List[UploadFile] = File(...)):
             'probability_map': terrain_z.tolist(),
             'binary_mask': mask_ds.tolist(),
             'original_image': orig_b64,
+            'sequence_detected': seq_result['is_sequential'] if seq_result else False,
+            'sequence_method': seq_result['method'] if seq_result else None,
+            'frame_count': len(seq_result['ordered_paths']) if seq_result and seq_result['is_sequential'] else 1,
+            'has_sequence': _has_seq,
+            'sequence_dir': _seq_dir,
         }
 
     except Exception as e:
