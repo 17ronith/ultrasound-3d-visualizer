@@ -1218,6 +1218,18 @@ let _currentData = null;
 let _canvasCoords = null;
 let _pendingFiles = null;
 
+// Pulse mode state
+let _pulseData    = null;
+let _pulseFrame   = 0;
+let _pulsePlayTimer = null;
+let _pulseSpeed   = 1.0;
+let _pulseLooping = true;
+let _pulseVideoImg = null;
+let _pulseVideoCtx = null;
+let _pulseMmodeImageData = null;
+let _terrainContainerId = 'three-container';
+let _modeSelectData = null;
+
 // Features 1–4 state
 let _camera = null;
 let _raycaster = null;
@@ -1256,19 +1268,27 @@ function teardownThree() {
   if (resetBtn) resetBtn.remove();
   const overlay = document.getElementById('slice-line-overlay');
   if (overlay) overlay.remove();
-  const c = document.getElementById('three-container');
+  const c = document.getElementById(_terrainContainerId);
   if (c) c.innerHTML = '';
+  _terrainContainerId = 'three-container';
 }
 
 // ── State machine ─────────────────────────────────────────────────────────────
 
 function showState(s) {
-  document.getElementById('state-drop').style.display      = s === 'drop'      ? 'flex' : 'none';
-  document.getElementById('state-loading').style.display   = s === 'loading'   ? 'flex' : 'none';
-  document.getElementById('state-dashboard').style.display = s === 'dashboard' ? 'flex' : 'none';
+  document.getElementById('state-drop').style.display        = s === 'drop'        ? 'flex' : 'none';
+  document.getElementById('state-loading').style.display     = s === 'loading'     ? 'flex' : 'none';
+  document.getElementById('state-mode-select').style.display = s === 'mode_select' ? 'flex' : 'none';
+  document.getElementById('state-dashboard').style.display   = s === 'dashboard'   ? 'flex' : 'none';
+  document.getElementById('state-pulse').style.display       = s === 'pulse'       ? 'flex' : 'none';
 }
 
 function setStatus(msg) { document.getElementById('loading-status').textContent = msg; }
+
+function setLoadingProgress(pct) {
+  const fill = document.getElementById('loading-progress-fill');
+  if (fill) fill.style.width = Math.min(100, pct) + '%';
+}
 
 function showError(msg) {
   const el = document.getElementById('error-toast');
@@ -1302,6 +1322,7 @@ document.getElementById('btn-load-new').addEventListener('click', () => {
   teardownThree();
   fileInput.value = '';
   _pendingFiles = null;
+  _modeSelectData = null;
   clearDropZoneReady();
   showState('drop');
 });
@@ -1367,7 +1388,8 @@ async function handleFiles(fileList) {
     clearInterval(ticker);
     setStatus('Rendering 3D…');
     await new Promise(r => setTimeout(r, 200));
-    showDashboard(data);
+    _modeSelectData = data;
+    showModeSelect(data);
   } catch (err) {
     clearInterval(ticker);
     showError(err.message);
@@ -1376,6 +1398,125 @@ async function handleFiles(fileList) {
 
 // Keep legacy single-file alias for Playwright test hook
 const handleFile = f => handleFiles([f]);
+
+// ── Mode Select ───────────────────────────────────────────────────────────────
+
+function showModeSelect(data) {
+  showState('mode_select');
+
+  const thumbCanvas = document.getElementById('mode-thumb-canvas');
+  const thumbCtx = thumbCanvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => {
+    const tw = thumbCanvas.parentElement.clientWidth;
+    const th = thumbCanvas.parentElement.clientHeight;
+    thumbCanvas.width = tw || 264; thumbCanvas.height = th || 80;
+    const scale = Math.min(thumbCanvas.width / img.width, thumbCanvas.height / img.height);
+    const dx = (thumbCanvas.width  - img.width  * scale) / 2;
+    const dy = (thumbCanvas.height - img.height * scale) / 2;
+    thumbCtx.fillStyle = '#0d0d0d';
+    thumbCtx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
+    thumbCtx.drawImage(img, dx, dy, img.width * scale, img.height * scale);
+  };
+  img.src = 'data:image/png;base64,' + data.original_image;
+
+  const pulseCard = document.getElementById('mode-card-pulse');
+  const pulseBtn  = document.getElementById('mode-btn-pulse');
+  const pulseDisabledLabel = document.getElementById('mode-pulse-disabled-label');
+  if (data.has_sequence) {
+    pulseCard.classList.remove('mode-card--disabled');
+    pulseBtn.disabled = false;
+    pulseDisabledLabel.style.display = 'none';
+  } else {
+    pulseCard.classList.add('mode-card--disabled');
+    pulseBtn.disabled = true;
+    pulseDisabledLabel.style.display = 'block';
+  }
+}
+
+document.getElementById('mode-btn-single').addEventListener('click', () => {
+  if (!_modeSelectData) return;
+  teardownThree();
+  showDashboard(_modeSelectData);
+});
+
+document.getElementById('mode-btn-pulse').addEventListener('click', async () => {
+  if (!_modeSelectData || !_modeSelectData.sequence_dir) return;
+  showState('loading');
+  document.getElementById('loading-progress-wrap').style.display = 'block';
+  setLoadingProgress(0);
+  setStatus('Loading 171 frames…');
+  try {
+    const pulseData = await fetchPulseWithProgress(_modeSelectData.sequence_dir);
+    setStatus('Rendering…');
+    await new Promise(r => setTimeout(r, 100));
+    showPulse(pulseData);
+  } catch (err) {
+    document.getElementById('loading-progress-wrap').style.display = 'none';
+    showError(err.message);
+  }
+});
+
+document.getElementById('mode-back-link').addEventListener('click', () => {
+  teardownThree();
+  fileInput.value = '';
+  _pendingFiles = null;
+  _modeSelectData = null;
+  showState('drop');
+});
+
+document.getElementById('pulse-back-link').addEventListener('click', () => {
+  stopPulsePlayback();
+  teardownThree();
+  if (_modeSelectData) showModeSelect(_modeSelectData);
+  else showState('drop');
+});
+
+async function fetchPulseWithProgress(sequenceDir) {
+  const fd = new FormData();
+  fd.append('sequence_dir', sequenceDir);
+  const res = await fetch('http://localhost:8000/analyze/pulse', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error(`Server error ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const stageMessages = [
+    'Computing pulsation variance…',
+    'Detecting pulse peaks…',
+    'Building M-mode…',
+    'Rendering…',
+  ];
+  let stageIdx = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop();
+    for (const event of events) {
+      if (!event.startsWith('data: ')) continue;
+      const json = JSON.parse(event.slice(6).trim());
+      if (json.done) {
+        setLoadingProgress(100);
+        return json;
+      }
+      if (json.error) throw new Error(json.error);
+      if (json.progress !== undefined) {
+        const pct = Math.round(json.progress / json.total * 100);
+        if (json.progress === json.total && stageIdx < stageMessages.length) {
+          setStatus(stageMessages[stageIdx++]);
+        } else {
+          setStatus(`Segmenting frame ${json.progress} / ${json.total}… (~60s total)`);
+        }
+        setLoadingProgress(pct * 0.9);
+      }
+    }
+  }
+  throw new Error('SSE stream ended without final event');
+}
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
@@ -1656,10 +1797,11 @@ function hotColor(t) {
   return [r, g, b];
 }
 
-function renderTerrain(data) {
+function renderTerrain(data, containerId = 'three-container') {
   teardownThree();
 
-  const container = document.getElementById('three-container');
+  _terrainContainerId = containerId;
+  const container = document.getElementById(containerId);
   const W = container.clientWidth  || 600;
   const H = container.clientHeight || 400;
 
