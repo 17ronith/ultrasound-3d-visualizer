@@ -49,7 +49,7 @@ _OVERRIDE_TO_ROUTE = {
     'Lung / CT':    'LIDC',
 }
 
-_FAST_DATA_ROOT = Path('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
+_FAST_DATA_ROOT = Path(fast.Config.getTestDataPath())
 
 def _find_sequence_dir(filename: str, uploaded_path: str = '') -> tuple[bool, str]:
     """Search FAST data for a numbered MHD file and return its directory if it is
