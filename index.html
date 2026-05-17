@@ -2482,6 +2482,219 @@ function startPulse(geo, finalColors, nVerts) {
   requestAnimationFrame(step);
 }
 
+// ── Pulse Analysis Rendering Functions ───────────────────────────────────────
+
+function buildPulseTerrainData(pulseData) {
+  const [vmH, vmW] = pulseData.variance_map_shape;
+  const probability_map = [];
+  for (let r = 0; r < vmH; r++) {
+    probability_map.push(Array.from(pulseData.variance_map.slice(r * vmW, (r + 1) * vmW)));
+  }
+  const [mpH, mpW] = pulseData.mean_probability_shape;
+  const binary_mask = [];
+  for (let r = 0; r < mpH; r++) {
+    const row = pulseData.mean_probability_map.slice(r * mpW, (r + 1) * mpW);
+    binary_mask.push(Array.from(row).map(v => v > 0.5 ? 1 : 0));
+  }
+  return {
+    probability_map,
+    binary_mask,
+    anatomy: 'JugularVein',
+    dimensionality: '2D_single',
+    format: 'mhd',
+    detected: true,
+    coverage: '12.00%',
+    mean_confidence: '80.00%',
+  };
+}
+
+function renderPulseVideo(pulseData) {
+  const canvas = document.getElementById('pulse-video-canvas');
+  const wrap = canvas.parentElement;
+  canvas.width  = wrap.clientWidth  || 400;
+  canvas.height = wrap.clientHeight || 300;
+  const ctx = canvas.getContext('2d');
+  _pulseVideoCtx = ctx;
+
+  const [fH, fW] = pulseData.representative_frame_shape;
+  const imgData = new ImageData(fW, fH);
+  for (let i = 0; i < fH * fW; i++) {
+    const v = pulseData.representative_frame[i];
+    imgData.data[i * 4]     = v;
+    imgData.data[i * 4 + 1] = v;
+    imgData.data[i * 4 + 2] = v;
+    imgData.data[i * 4 + 3] = 255;
+  }
+  const offCanvas = new OffscreenCanvas(fW, fH);
+  offCanvas.getContext('2d').putImageData(imgData, 0, 0);
+
+  createImageBitmap(offCanvas).then(bmp => {
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const scale = Math.min(canvas.width / fW, canvas.height / fH);
+    const dx = (canvas.width  - fW * scale) / 2;
+    const dy = (canvas.height - fH * scale) / 2;
+    ctx.drawImage(bmp, dx, dy, fW * scale, fH * scale);
+
+    const [mpH, mpW] = pulseData.mean_probability_shape;
+    const cellW = (fW * scale) / mpW;
+    const cellH = (fH * scale) / mpH;
+    ctx.fillStyle = 'rgba(0,229,255,0.28)';
+    for (let r = 0; r < mpH; r++) {
+      for (let c = 0; c < mpW; c++) {
+        if (pulseData.mean_probability_map[r * mpW + c] > 0.5) {
+          ctx.fillRect(dx + c * cellW, dy + r * cellH, cellW, cellH);
+        }
+      }
+    }
+
+    const lineX = dx + (pulseData.centroid_col / fW) * fW * scale;
+    ctx.strokeStyle = 'rgba(0,229,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(lineX, dy);
+    ctx.lineTo(lineX, dy + fH * scale);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+}
+
+function buildMmodeImageData(pulseData) {
+  const [mT, mD] = pulseData.mmode_shape;
+  const imgData = new ImageData(mT, mD);
+  for (let t = 0; t < mT; t++) {
+    for (let d = 0; d < mD; d++) {
+      const v = Math.round(pulseData.mmode_data[t * mD + d] * 255);
+      const pixIdx = (d * mT + t) * 4;
+      imgData.data[pixIdx]     = v;
+      imgData.data[pixIdx + 1] = v;
+      imgData.data[pixIdx + 2] = v;
+      imgData.data[pixIdx + 3] = 255;
+    }
+  }
+  _pulseMmodeImageData = imgData;
+  return imgData;
+}
+
+function renderPulseMmode(pulseData, frameIdx) {
+  const canvas = document.getElementById('pulse-mmode-canvas');
+  const wrap = canvas.parentElement;
+  canvas.width  = wrap.clientWidth  || 400;
+  canvas.height = wrap.clientHeight || 200;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (!_pulseMmodeImageData) buildMmodeImageData(pulseData);
+
+  const [mT, mD] = pulseData.mmode_shape;
+  const offC = new OffscreenCanvas(mT, mD);
+  offC.getContext('2d').putImageData(_pulseMmodeImageData, 0, 0);
+  createImageBitmap(offC).then(bmp => {
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(184,85,53,0.9)';
+    for (const pf of pulseData.peak_frames) {
+      const px = (pf / mT) * canvas.width;
+      ctx.beginPath();
+      ctx.moveTo(px - 4, 0);
+      ctx.lineTo(px + 4, 0);
+      ctx.lineTo(px, 7);
+      ctx.fill();
+    }
+
+    const cx = (frameIdx / mT) * canvas.width;
+    ctx.strokeStyle = 'rgba(255,165,0,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, canvas.height);
+    ctx.stroke();
+  });
+}
+
+function renderPulseWaveform(pulseData, frameIdx) {
+  const canvas = document.getElementById('pulse-waveform-canvas');
+  canvas.width  = canvas.parentElement.clientWidth  || 800;
+  canvas.height = canvas.parentElement.clientHeight || 100;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const N = pulseData.vessel_area_waveform.length;
+  const pad = { top: 14, bottom: 18, left: 8, right: 8 };
+  const innerW = W - pad.left - pad.right;
+  const innerH = H - pad.top  - pad.bottom;
+
+  ctx.fillStyle = '#111111';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = '8px "DM Mono", monospace';
+  ctx.textAlign = 'center';
+  for (let f = 0; f < N; f += 30) {
+    const x = pad.left + (f / (N - 1)) * innerW;
+    const ts = ((f / (N - 1)) * pulseData.duration_seconds).toFixed(1) + 's';
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x, pad.top, 1, innerH);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillText(ts, x, H - 3);
+  }
+
+  for (const pf of pulseData.peak_frames) {
+    const x = pad.left + (pf / (N - 1)) * innerW;
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + innerH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(0,229,255,0.8)';
+    ctx.beginPath(); ctx.arc(x, pad.top + 4, 3, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.strokeStyle = '#b85535';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  pulseData.vessel_area_waveform.forEach((v, i) => {
+    const x = pad.left + (i / (N - 1)) * innerW;
+    const y = pad.top  + innerH - v * innerH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  const cx = pad.left + (frameIdx / (N - 1)) * innerW;
+  ctx.strokeStyle = 'rgba(255,165,0,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(cx, pad.top); ctx.lineTo(cx, pad.top + innerH); ctx.stroke();
+
+  if (pulseData.bpm != null) {
+    ctx.fillStyle = '#b85535';
+    ctx.font = '10px "DM Mono", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`~${pulseData.bpm} BPM  ·  ${pulseData.peak_frames.length} peaks`, W - 8, pad.top + 10);
+  }
+
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '8px "DM Mono", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('PULSE WAVEFORM', 8, pad.top + 10);
+}
+
+function updatePulseFrame(idx) {
+  if (!_pulseData) return;
+  _pulseFrame = Math.max(0, Math.min(idx, _pulseData.frame_count - 1));
+
+  const scrubber = document.getElementById('pulse-scrubber');
+  if (scrubber) scrubber.value = _pulseFrame;
+  const lbl = document.getElementById('pulse-frame-label');
+  if (lbl) lbl.textContent = `Frame ${_pulseFrame} / ${_pulseData.frame_count}`;
+  const counter = document.getElementById('pulse-frame-counter');
+  if (counter) counter.textContent = `Frame ${_pulseFrame} / ${_pulseData.frame_count}`;
+
+  renderPulseMmode(_pulseData, _pulseFrame);
+  renderPulseWaveform(_pulseData, _pulseFrame);
+}
+
 window.__handleFile = handleFile;
 </script>
 </body>
