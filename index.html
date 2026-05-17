@@ -105,6 +105,14 @@
       color: var(--accent);
     }
 
+    .drop-zone.files-ready {
+      border-style: solid;
+      border-color: #2a7a4a;
+      background: rgba(42,122,74,0.04);
+    }
+    .drop-zone.files-ready .drop-icon { color: #2a7a4a; }
+    .drop-zone.files-ready .drop-title { color: #2a7a4a; }
+
     .drop-title {
       font-family: var(--lora);
       font-size: 16px;
@@ -132,6 +140,60 @@
       font-weight: 300;
       color: var(--dim);
       margin-top: 10px;
+    }
+
+    .anatomy-selector {
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      width: 460px;
+    }
+
+    .anatomy-selector-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--dim);
+    }
+
+    .anatomy-optional {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      opacity: 0.7;
+    }
+
+    .anatomy-select {
+      width: 100%;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text);
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 36px 9px 14px;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23b8aba0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+
+    .anatomy-select:hover  { border-color: var(--border-hi); }
+    .anatomy-select:focus  { border-color: var(--accent); }
+
+    .anatomy-selector-hint {
+      font-size: 11px;
+      font-weight: 300;
+      color: var(--dim);
     }
 
     /* ═══════════════════════════════════════
@@ -182,6 +244,7 @@
       display: none;
       flex-direction: column;
       background: var(--bg);
+      overflow: hidden;
     }
 
     /* Header */
@@ -275,6 +338,136 @@
       height: 100%;
       border-radius: 1px;
       opacity: 0.85;
+    }
+
+    /* Tooltip on stat cards */
+    .stat-card[data-tooltip] { position: relative; cursor: default; }
+    .stat-card[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #2a201a;
+      color: #e8e0d8;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 300;
+      line-height: 1.4;
+      padding: 6px 10px;
+      border-radius: 5px;
+      white-space: normal;
+      width: 220px;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 99;
+    }
+    .stat-card[data-tooltip]:hover::after { opacity: 1; }
+
+    /* Control bar — lives inside the 3D right panel */
+    .ctrl-bar {
+      display: flex;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 10px;
+      height: 52px;
+      flex-shrink: 0;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .ctrl-section {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 16px;
+      gap: 3px;
+      flex: 0 0 auto;
+    }
+    .ctrl-section:first-child { padding-left: 0; }
+    .ctrl-divider {
+      width: 1px;
+      height: 30px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .ctrl-label {
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--dim);
+    }
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .ctrl-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 2px;
+      background: var(--border);
+      border-radius: 1px;
+      cursor: pointer;
+      width: 110px;
+      outline: none;
+    }
+    .ctrl-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .ctrl-slider::-moz-range-thumb {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+    }
+    .ctrl-val {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      min-width: 34px;
+    }
+    .preset-btn {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      padding: 3px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+      white-space: nowrap;
+    }
+    .preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .preset-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .ctrl-playpause {
+      font-size: 10px;
+      width: 22px;
+      height: 22px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
     }
 
     /* Main panels */
@@ -396,6 +589,329 @@
       max-width: 80vw;
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     }
+
+    /* ═══════════════════════════════════════
+       MODE SELECT STATE
+    ═══════════════════════════════════════ */
+
+    #state-mode-select {
+      height: 100vh;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      background: var(--bg);
+      padding: 40px 24px;
+    }
+
+    .mode-select-title {
+      font-family: var(--lora);
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--text);
+      text-align: center;
+    }
+
+    .mode-cards {
+      display: flex;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .mode-card {
+      width: 320px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 32px 28px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      position: relative;
+    }
+    .mode-card:hover:not(.mode-card--disabled) {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(184,85,53,0.12);
+    }
+    .mode-card--disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .mode-card-icon {
+      width: 44px;
+      height: 44px;
+      color: var(--accent);
+    }
+    .mode-card--disabled .mode-card-icon { color: var(--dim); }
+
+    .mode-card-title {
+      font-family: var(--lora);
+      font-size: 18px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .mode-card-desc {
+      font-size: 13px;
+      font-weight: 300;
+      color: var(--muted);
+      line-height: 1.65;
+      flex: 1;
+    }
+
+    .mode-card-thumb {
+      width: 100%;
+      height: 80px;
+      border-radius: 6px;
+      background: #0d0d0d;
+      overflow: hidden;
+    }
+    .mode-card-thumb canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .mode-card-btn {
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 10px 20px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.15s;
+      align-self: flex-start;
+    }
+    .mode-card-btn:hover { background: var(--accent-hi); }
+    .mode-card-btn:disabled {
+      background: var(--border-hi);
+      cursor: not-allowed;
+    }
+
+    .mode-card-disabled-label {
+      font-size: 11px;
+      font-weight: 300;
+      color: var(--dim);
+      margin-top: 4px;
+    }
+
+    .mode-back-link {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .mode-back-link:hover { color: var(--accent); }
+
+    /* ═══════════════════════════════════════
+       PULSE STATE
+    ═══════════════════════════════════════ */
+
+    #state-pulse {
+      height: 100vh;
+      display: none;
+      flex-direction: column;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    /* waveform bar */
+    .pulse-waveform-bar {
+      flex-shrink: 0;
+      height: 100px;
+      background: #111111;
+      border-top: 1px solid var(--border);
+      position: relative;
+    }
+    #pulse-waveform-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+
+    /* pulse control bar */
+    .pulse-ctrl-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 18px;
+    }
+    .pulse-ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .pulse-ctrl-label {
+      font-family: var(--mono);
+      font-size: 8px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--dim);
+      min-width: 90px;
+    }
+    .pulse-playpause {
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .pulse-scrubber {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 2px;
+      background: var(--border);
+      border-radius: 1px;
+      cursor: pointer;
+      flex: 1;
+      outline: none;
+    }
+    .pulse-scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .pulse-frame-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      min-width: 90px;
+      text-align: right;
+    }
+    .pulse-speed-btn {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 500;
+      padding: 3px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+    }
+    .pulse-speed-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+    /* left panel split */
+    .pulse-left-panel {
+      flex: 0 0 46%;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      gap: 0;
+    }
+    .pulse-video-wrap {
+      flex: 3;
+      position: relative;
+      min-height: 0;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+      background: #0d0d0d;
+    }
+    #pulse-video-canvas { width: 100%; height: 100%; display: block; }
+    .pulse-frame-counter {
+      position: absolute;
+      bottom: 8px;
+      right: 10px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(0,0,0,0.45);
+      padding: 2px 7px;
+      border-radius: 3px;
+      pointer-events: none;
+    }
+    .pulse-centroid-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .pulse-mmode-wrap {
+      flex: 2;
+      position: relative;
+      min-height: 0;
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+      background: #0d0d0d;
+    }
+    #pulse-mmode-canvas { width: 100%; height: 100%; display: block; cursor: crosshair; }
+    .pulse-mmode-label {
+      position: absolute;
+      top: 6px;
+      left: 10px;
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: rgba(184,85,53,0.8);
+      pointer-events: none;
+    }
+
+    /* right panel */
+    .pulse-right-panel {
+      flex: 1;
+      position: relative;
+      min-height: 0;
+      background: #0d0d0d;
+    }
+    #pulse-three-container {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* stats bar reuse */
+    .pulse-stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    /* loading progress bar (appended to loading state) */
+    .loading-progress-wrap {
+      width: 280px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .loading-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
   </style>
 
   <script type="importmap">
@@ -418,7 +934,7 @@
     Using <label for="file-input"> is the most reliable cross-browser way to
     open a file chooser on click — no JavaScript programmatic .click() needed.
   -->
-  <label class="drop-zone" id="drop-zone" for="file-input">
+  <label class="drop-zone" id="drop-zone">
     <svg class="drop-icon" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M22 28V16M22 16L17 21M22 16L27 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
       <path d="M14 32h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -434,6 +950,24 @@
 
   <!-- MHD note: upload the .mhd and .raw together -->
   <div class="drop-hint">For MHD files, select both the .mhd and .raw files together</div>
+
+  <!-- Anatomy override selector -->
+  <div class="anatomy-selector">
+    <div class="anatomy-selector-label">Anatomy <span class="anatomy-optional">(required)</span></div>
+    <select id="anatomy-select" class="anatomy-select">
+      <option value="" disabled selected>— select anatomy —</option>
+      <option value="Jugular Vein">Jugular Vein</option>
+      <option value="Carotid Artery">Carotid Artery</option>
+      <option value="Femoral Artery">Femoral Artery</option>
+      <option value="Heart">Heart</option>
+      <option value="Lung / CT">Lung / CT</option>
+      <option value="Breast">Breast</option>
+      <option value="Thyroid">Thyroid</option>
+      <option value="Abdomen">Abdomen</option>
+      <option value="Other">Other</option>
+    </select>
+    <div class="anatomy-selector-hint">Leave as Auto-detect if your file is from the FAST dataset</div>
+  </div>
 
   <input type="file" id="file-input" style="display:none" multiple
          accept=".mhd,.raw,.jpg,.jpeg,.png,.bmp,.dcm,.avi,.mp4">
@@ -465,8 +999,59 @@
     </div>
     <div class="panel-right">
       <div class="panel-label">3D Terrain · Interactive</div>
+
       <div class="panel-3d-wrap">
         <div id="three-container"></div>
+      </div>
+
+      <!-- Controls: opacity · transfer function · axial slice -->
+      <div class="ctrl-bar" id="ctrl-bar">
+
+        <!-- Section 1: Opacity -->
+        <div class="ctrl-section">
+          <div class="ctrl-label">Opacity</div>
+          <div class="ctrl-row">
+            <input type="range" class="ctrl-slider" id="ctrl-opacity" min="30" max="100" value="100" step="1">
+            <span class="ctrl-val" id="ctrl-opacity-val">100%</span>
+          </div>
+        </div>
+
+        <div class="ctrl-divider"></div>
+
+        <!-- Section 2: Transfer function presets -->
+        <div class="ctrl-section">
+          <div class="ctrl-label">Transfer Function</div>
+          <div class="ctrl-row">
+            <button class="preset-btn active" data-preset="RAW">RAW</button>
+            <button class="preset-btn" data-preset="SOFT TISSUE">SOFT TISSUE</button>
+            <button class="preset-btn" data-preset="VASCULAR">VASCULAR</button>
+            <button class="preset-btn" data-preset="BONE">BONE</button>
+          </div>
+        </div>
+
+        <div class="ctrl-divider" id="ctrl-slice-div"></div>
+
+        <!-- Section 3: Axial slice (hidden for 3D volume) -->
+        <div class="ctrl-section" id="ctrl-slice-section">
+          <div class="ctrl-label">Axial Slice</div>
+          <div class="ctrl-row">
+            <input type="range" class="ctrl-slider" id="ctrl-slice" min="0" max="100" value="0" step="1">
+            <span class="ctrl-val" id="ctrl-slice-val">0%</span>
+          </div>
+        </div>
+
+        <div class="ctrl-divider" id="ctrl-time-div" style="display:none"></div>
+
+        <!-- Section 4: Time scrubber (hidden — server returns single representative frame) -->
+        <div class="ctrl-section" id="ctrl-time-section" style="display:none">
+          <div class="ctrl-label">Frame</div>
+          <div class="ctrl-row">
+            <button class="ctrl-playpause" id="ctrl-playpause">&#9654;</button>
+            <input type="range" class="ctrl-slider" id="ctrl-time" min="0" max="0" value="0" step="1">
+            <span class="ctrl-val" id="ctrl-time-val">0 / 0</span>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -505,11 +1090,54 @@ const parsePct = s => parseFloat((s||'0').replace('%','')) || 0;
 // ── Three.js state ────────────────────────────────────────────────────────────
 
 let _renderer = null, _animId = null, _resizeObs = null;
+let _axisRenderer = null, _axisScene = null, _axisCamera = null;
+
+// Terrain control state
+let _terrainMesh = null, _terrainGeo = null;
+let _terrainMinY = 0, _terrainMaxY = 1;
+let _terrainClipPlane = null;
+let _currentData = null;
+let _canvasCoords = null;
+let _pendingFiles = null;
+
+// Features 1–4 state
+let _camera = null;
+let _raycaster = null;
+let _terrainFinalZ = null;
+let _terrainRows = 0, _terrainCols = 0;
+let _hoverHighlightedVerts = [];
+let _currentPreset = 'RAW';
+let _animAbort = false;
+let _canvasOffscreen = null;
+let _canvasRenderData = null;
+let _canvasHighlightRect = null;
+let _canvasZoomCurrent = { scale: 1, tx: 0, ty: 0 };
+let _canvasZoomTarget  = { scale: 1, tx: 0, ty: 0 };
+let _canvasZoomAnimId  = null;
 
 function teardownThree() {
-  if (_animId)    { cancelAnimationFrame(_animId); _animId = null; }
-  if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
-  if (_renderer)  { _renderer.dispose(); _renderer = null; }
+  if (_animId)       { cancelAnimationFrame(_animId); _animId = null; }
+  if (_resizeObs)    { _resizeObs.disconnect(); _resizeObs = null; }
+  if (_renderer)     { _renderer.dispose(); _renderer = null; }
+  if (_axisRenderer) { _axisRenderer.dispose(); _axisRenderer = null; }
+  _axisScene = null; _axisCamera = null;
+  _terrainMesh = null; _terrainGeo = null; _terrainClipPlane = null;
+  _canvasCoords = null;
+  _animAbort = true;
+  _camera = null; _raycaster = null;
+  _terrainFinalZ = null; _terrainRows = 0; _terrainCols = 0;
+  _hoverHighlightedVerts = [];
+  _canvasOffscreen = null; _canvasRenderData = null;
+  _canvasHighlightRect = null;
+  _canvasZoomCurrent = { scale: 1, tx: 0, ty: 0 };
+  _canvasZoomTarget  = { scale: 1, tx: 0, ty: 0 };
+  if (_canvasZoomAnimId) { cancelAnimationFrame(_canvasZoomAnimId); _canvasZoomAnimId = null; }
+  const hoEl = document.getElementById('hover-crosshair-overlay');
+  if (hoEl) hoEl.remove();
+  const resetBtn = document.getElementById('canvas-reset-btn');
+  if (resetBtn) resetBtn.remove();
+  const overlay = document.getElementById('slice-line-overlay');
+  if (overlay) overlay.remove();
   const c = document.getElementById('three-container');
   if (c) c.innerHTML = '';
 }
@@ -537,7 +1165,10 @@ function showError(msg) {
 // The drop zone is a <label for="file-input"> so click-to-browse works natively.
 // Only drag-and-drop events need JS.
 
-const dz = document.getElementById('drop-zone');
+const dz       = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dz.addEventListener('click',     () => fileInput.click());
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
 dz.addEventListener('drop', e => {
@@ -551,13 +1182,52 @@ document.getElementById('file-input').addEventListener('change', e => {
 
 document.getElementById('btn-load-new').addEventListener('click', () => {
   teardownThree();
-  document.getElementById('file-input').value = '';
+  fileInput.value = '';
+  _pendingFiles = null;
+  clearDropZoneReady();
   showState('drop');
 });
 
 // ── Upload & analyze ──────────────────────────────────────────────────────────
 
+function setDropZoneReady(fileList) {
+  const dz = document.getElementById('drop-zone');
+  dz.classList.add('files-ready');
+  const n = fileList.length;
+  const title = dz.querySelector('.drop-title');
+  const sub   = dz.querySelector('.drop-sub');
+  if (title) title.textContent = `${n} file${n > 1 ? 's' : ''} ready`;
+  if (sub)   sub.innerHTML = 'Select an anatomy type below<br>to run the AI pipeline';
+}
+
+function clearDropZoneReady() {
+  const dz = document.getElementById('drop-zone');
+  dz.classList.remove('files-ready');
+  const title = dz.querySelector('.drop-title');
+  const sub   = dz.querySelector('.drop-sub');
+  if (title) title.textContent = 'Drop any ultrasound file here';
+  if (sub)   sub.innerHTML = 'or click to browse<br>Runs the full AI segmentation pipeline';
+}
+
+document.getElementById('anatomy-select').addEventListener('change', () => {
+  if (_pendingFiles) handleFiles(_pendingFiles);
+});
+
 async function handleFiles(fileList) {
+  const anatomySelect = document.getElementById('anatomy-select');
+  const anatomyOverride = anatomySelect ? anatomySelect.value : '';
+  if (!anatomyOverride) {
+    // Hold files — wait for anatomy selection
+    _pendingFiles = fileList;
+    setDropZoneReady(fileList);
+    anatomySelect.style.borderColor = 'var(--accent)';
+    anatomySelect.style.boxShadow = '0 0 0 3px rgba(184,85,53,0.18)';
+    anatomySelect.focus();
+    setTimeout(() => { anatomySelect.style.borderColor = ''; anatomySelect.style.boxShadow = ''; }, 2500);
+    return;
+  }
+  _pendingFiles = null;
+  clearDropZoneReady();
   showState('loading');
 
   const msgs = ['Detecting format…', 'Running preprocessing…', 'Running inference…'];
@@ -568,6 +1238,7 @@ async function handleFiles(fileList) {
   try {
     const fd = new FormData();
     for (const f of fileList) fd.append('files', f);
+    fd.append('anatomy_override', anatomyOverride);
 
     const res = await fetch(API, { method: 'POST', body: fd });
     if (!res.ok) {
@@ -591,58 +1262,105 @@ const handleFile = f => handleFiles([f]);
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 function showDashboard(data) {
+  _currentData = data;
   showState('dashboard');
   renderHeader(data);
   renderStats(data);
   renderCanvas(data);
   renderTerrain(data);
+  setupControls(data);
   document.getElementById('footer-info').textContent =
-    `${data.anatomy} · ${data.dimensionality} · rotate · zoom · pan`;
+    `${data.anatomy === 'unknown' ? 'Unrecognized' : data.anatomy} · ${data.dimensionality.replace(/_/g, ' ')} · rotate · zoom · pan`;
 }
 
 function renderHeader(data) {
   const c = badgeFor(data.anatomy);
+  const anatomyLabel = data.anatomy === 'unknown' ? 'Unrecognized' : data.anatomy;
+  const dimLabel = data.dimensionality.replace(/_/g, ' ');
+
+  const methodLabel = {
+    'dicom_series_uid':   'DICOM series',
+    'filename_numbering': 'filename order',
+    'dimension_intensity':'content similarity',
+  };
+  const seqBadge = (data.sequence_detected && data.frame_count > 1)
+    ? `<span class="badge" style="background:#e8f4ec;color:#2a7a4a;border:1px solid #a8d5b5">
+         ${data.frame_count} frames &middot; ${methodLabel[data.sequence_method] || data.sequence_method}
+       </span>`
+    : '';
+
   document.getElementById('header-badges').innerHTML =
-    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">${data.anatomy}</span>
+    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">${anatomyLabel}</span>
      <span class="badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">
-       ${data.format.toUpperCase()} &middot; ${data.dimensionality}
-     </span>`;
+       ${data.format.toUpperCase()} &middot; ${dimLabel}
+     </span>
+     ${seqBadge}`;
 }
 
 function renderStats(data) {
-  const c = badgeFor(data.anatomy);
-  const detColor = data.detected ? '#2a7a4a' : '#c03030';
+  const c         = badgeFor(data.anatomy);
+  const isUnknown = data.anatomy === 'unknown';
+  const covPct    = parsePct(data.coverage);
+  const confPct   = parsePct(data.mean_confidence);
+
+  // Anatomy card
+  const anatomyLabel = isUnknown ? 'Unrecognized' : data.anatomy;
+  const anatomySub   = isUnknown
+    ? 'Auto-detection unavailable — using intensity analysis.'
+    : 'Structure detected via trained ONNX model.';
+
+  // Detection card
+  const detColor = data.detected ? '#2a7a4a' : '#8a7a6c';
   const detText  = data.detected ? '&#10003; Detected' : '&#10007; Not found';
-  const covPct   = parsePct(data.coverage);
-  const confPct  = parsePct(data.mean_confidence);
-  const covColor  = pctColor(covPct);
-  const confColor = pctColor(confPct);
+  let detSub;
+  if (isUnknown) {
+    detSub = 'High-intensity region identified via pixel threshold.';
+  } else if (data.anatomy === 'JugularVein') {
+    detSub = 'Jugular vein segmented via trained neural network.';
+  } else if (data.anatomy === 'LIDC') {
+    detSub = 'Lung nodule segmented via trained neural network.';
+  } else {
+    detSub = `${data.anatomy} segmented via trained neural network.`;
+  }
+
+  // Coverage card
+  let covInterp;
+  if (covPct < 5)       covInterp = 'Small focal structure.';
+  else if (covPct < 20) covInterp = 'Moderate region.';
+  else                  covInterp = 'Large region — consider threshold adjustment.';
+
+  // Confidence card
+  const confSub = isUnknown
+    ? 'Intensity-based estimate — no trained model for this type.'
+    : 'Neural network certainty score.';
+
+  const TC = '#b85535'; // terracotta (--accent)
 
   document.getElementById('stats-row').innerHTML = `
     <div class="stat-card">
       <div class="stat-label">Anatomy</div>
-      <div class="stat-value" style="font-size:16px;color:${c.text}">${data.anatomy}</div>
-      <div class="stat-sub">${data.dimensionality}</div>
+      <div class="stat-value" style="font-size:16px;color:${c.text}">${anatomyLabel}</div>
+      <div class="stat-sub">${anatomySub}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Detection</div>
       <div class="stat-value" style="font-size:14px;color:${detColor}">${detText}</div>
-      <div class="stat-sub">structure in scan</div>
+      <div class="stat-sub">${detSub}</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Coverage: percentage of the image area identified as containing the detected structure.">
       <div class="stat-label">Coverage</div>
-      <div class="stat-value" style="color:${covColor}">${data.coverage}</div>
-      <div class="stat-sub">of image area</div>
+      <div class="stat-value">${data.coverage}</div>
+      <div class="stat-sub">${covInterp}</div>
       <div class="progress-bar">
-        <div class="progress-fill" style="width:${Math.min(covPct,100)}%;background:${covColor}"></div>
+        <div class="progress-fill" style="width:${Math.min(covPct,100)}%;background:${TC}"></div>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Confidence: how certain the model is that detected pixels belong to the target structure, averaged over the detected region.">
       <div class="stat-label">Mean Confidence</div>
-      <div class="stat-value" style="color:${confColor}">${data.mean_confidence}</div>
-      <div class="stat-sub">model certainty</div>
+      <div class="stat-value">${data.mean_confidence}</div>
+      <div class="stat-sub">${confSub}</div>
       <div class="progress-bar">
-        <div class="progress-fill" style="width:${Math.min(confPct,100)}%;background:${confColor}"></div>
+        <div class="progress-fill" style="width:${Math.min(confPct,100)}%;background:${TC}"></div>
       </div>
     </div>`;
 }
@@ -651,7 +1369,7 @@ function renderStats(data) {
 
 function renderCanvas(data) {
   const canvas = document.getElementById('scan-canvas');
-  const parent = canvas.parentElement;  // .panel-canvas-wrap
+  const parent = canvas.parentElement;
   const cW = parent.clientWidth  || 400;
   const cH = parent.clientHeight || 400;
   canvas.width  = cW;
@@ -663,46 +1381,145 @@ function renderCanvas(data) {
 
   const img = new Image();
   img.onload = () => {
-    const scale = Math.min(cW / img.width, cH / img.height);
-    const dw = Math.round(img.width  * scale);
-    const dh = Math.round(img.height * scale);
-    const ox = Math.round((cW - dw) / 2);
-    const oy = Math.round((cH - dh) / 2);
-    ctx.drawImage(img, ox, oy, dw, dh);
+    // Shared coordinate origin: object-fit contain
+    const scale       = Math.min(cW / img.width, cH / img.height);
+    const imgDrawWidth  = Math.round(img.width  * scale);
+    const imgDrawHeight = Math.round(img.height * scale);
+    const imgX = Math.round((cW - imgDrawWidth)  / 2);
+    const imgY = Math.round((cH - imgDrawHeight) / 2);
+    _canvasCoords = { imgX, imgY, imgDrawWidth, imgDrawHeight, cW, cH };
 
-    const mask = data.binary_mask;
-    const rows = mask.length, cols = mask[0].length;
-    const [r, g, b] = badgeFor(data.anatomy).rgb;
+    ctx.drawImage(img, imgX, imgY, imgDrawWidth, imgDrawHeight);
 
-    const off = document.createElement('canvas');
-    off.width = cols; off.height = rows;
-    const octx = off.getContext('2d');
+    // ── Contrast enhancement: histogram equalization + S-curve ────────────
+    const imgData = ctx.getImageData(imgX, imgY, imgDrawWidth, imgDrawHeight);
+    const px  = imgData.data;
+    const nPx = imgDrawWidth * imgDrawHeight;
 
-    const fill = octx.createImageData(cols, rows);
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        if (!mask[y][x]) continue;
-        const i = (y * cols + x) * 4;
-        fill.data[i]=r; fill.data[i+1]=g; fill.data[i+2]=b; fill.data[i+3]=80;
-      }
+    // Histogram of grayscale luminance across the drawn image region
+    const hist = new Int32Array(256);
+    for (let i = 0; i < nPx; i++) {
+      hist[Math.round(0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2])]++;
     }
-    octx.putImageData(fill, 0, 0);
-    ctx.drawImage(off, ox, oy, dw, dh);
 
-    const contour = octx.createImageData(cols, rows);
-    for (let y = 1; y < rows - 1; y++) {
-      for (let x = 1; x < cols - 1; x++) {
-        if (!mask[y][x]) continue;
-        if (!mask[y-1][x] || !mask[y+1][x] || !mask[y][x-1] || !mask[y][x+1]) {
-          const i = (y * cols + x) * 4;
-          contour.data[i]=r; contour.data[i+1]=g; contour.data[i+2]=b; contour.data[i+3]=220;
+    // Cumulative distribution function
+    const cdf = new Float32Array(256);
+    cdf[0] = hist[0];
+    for (let i = 1; i < 256; i++) cdf[i] = cdf[i-1] + hist[i];
+    let cdfMin = 0;
+    for (let i = 0; i < 256; i++) { if (cdf[i] > 0) { cdfMin = cdf[i]; break; } }
+    const cdfRange = nPx - cdfMin;
+
+    // Histogram equalization LUT (maps each input level to equalized output)
+    const lut = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      lut[i] = cdfRange > 0 ? Math.round((cdf[i] - cdfMin) / cdfRange * 255) : i;
+    }
+
+    // Apply LUT then S-curve: v = v<0.5 ? 2v² : 1-2(1-v)²
+    for (let i = 0; i < nPx; i++) {
+      const ri  = i * 4;
+      const lum = Math.round(0.299 * px[ri] + 0.587 * px[ri+1] + 0.114 * px[ri+2]);
+      let v = lut[lum] / 255;
+      v = v < 0.5 ? 2 * v * v : 1 - 2 * (1 - v) * (1 - v);
+      const out = Math.round(v * 255);
+      px[ri] = out; px[ri+1] = out; px[ri+2] = out;
+    }
+    ctx.putImageData(imgData, imgX, imgY);
+
+    const probMap  = data.probability_map;
+    const maskRows = probMap.length;
+    const maskCols = probMap[0].length;
+    const cellW    = imgDrawWidth  / maskCols;
+    const cellH    = imgDrawHeight / maskRows;
+
+    let pmMax = 0;
+    for (let r = 0; r < maskRows; r++)
+      for (let c = 0; c < maskCols; c++)
+        if (probMap[r][c] > pmMax) pmMax = probMap[r][c];
+
+    const thresh      = 0.4;
+    const adaptThresh = 0.6 * pmMax;
+
+    // Build above-threshold binary mask
+    const aboveThresh = new Uint8Array(maskRows * maskCols);
+    for (let r = 0; r < maskRows; r++)
+      for (let c = 0; c < maskCols; c++)
+        if (probMap[r][c] > thresh && probMap[r][c] > adaptThresh)
+          aboveThresh[r * maskCols + c] = 1;
+
+    // BFS connected components — keep only the largest to suppress stray fragments
+    const visited = new Uint8Array(maskRows * maskCols);
+    let largestSet = new Set();
+    let largestSize = 0;
+
+    for (let startR = 0; startR < maskRows; startR++) {
+      for (let startC = 0; startC < maskCols; startC++) {
+        const startIdx = startR * maskCols + startC;
+        if (!aboveThresh[startIdx] || visited[startIdx]) continue;
+        const queue = [startIdx];
+        const component = [];
+        let qi = 0;
+        visited[startIdx] = 1;
+        while (qi < queue.length) {
+          const idx = queue[qi++];
+          component.push(idx);
+          const r = Math.floor(idx / maskCols);
+          const c = idx % maskCols;
+          if (r > 0)          { const n=(r-1)*maskCols+c; if (aboveThresh[n]&&!visited[n]) { visited[n]=1; queue.push(n); } }
+          if (r < maskRows-1) { const n=(r+1)*maskCols+c; if (aboveThresh[n]&&!visited[n]) { visited[n]=1; queue.push(n); } }
+          if (c > 0)          { const n=r*maskCols+(c-1); if (aboveThresh[n]&&!visited[n]) { visited[n]=1; queue.push(n); } }
+          if (c < maskCols-1) { const n=r*maskCols+(c+1); if (aboveThresh[n]&&!visited[n]) { visited[n]=1; queue.push(n); } }
+        }
+        if (component.length > largestSize) {
+          largestSize = component.length;
+          largestSet = new Set(component);
         }
       }
     }
-    octx.clearRect(0, 0, cols, rows);
-    octx.putImageData(contour, 0, 0);
-    ctx.drawImage(off, ox, oy, dw, dh);
+
+    const off  = document.createElement('canvas');
+    off.width  = cW; off.height = cH;
+    const octx = off.getContext('2d');
+    octx.fillStyle = 'rgba(0,255,255,0.35)';
+
+    for (let r = 0; r < maskRows; r++) {
+      for (let c = 0; c < maskCols; c++) {
+        if (largestSet.has(r * maskCols + c)) {
+          const cx = imgX + (c / maskCols) * imgDrawWidth;
+          const cy = imgY + (r / maskRows) * imgDrawHeight;
+          octx.fillRect(cx, cy, cellW, cellH);
+        }
+      }
+    }
+    ctx.drawImage(off, 0, 0);
+
+    ctx.fillStyle = 'rgba(0,255,255,1.0)';
+    for (let r = 1; r < maskRows - 1; r++) {
+      for (let c = 1; c < maskCols - 1; c++) {
+        if (!largestSet.has(r * maskCols + c)) continue;
+        if (!largestSet.has((r-1)*maskCols+c) || !largestSet.has((r+1)*maskCols+c) ||
+            !largestSet.has(r*maskCols+(c-1)) || !largestSet.has(r*maskCols+(c+1))) {
+          const cx = imgX + (c / maskCols) * imgDrawWidth;
+          const cy = imgY + (r / maskRows) * imgDrawHeight;
+          ctx.fillRect(cx - 0.5, cy - 0.5, 2, 2);
+        }
+      }
+    }
+
+    // Store offscreen snapshot for zoom redraw (Feature 2)
+    _canvasOffscreen = document.createElement('canvas');
+    _canvasOffscreen.width = cW; _canvasOffscreen.height = cH;
+    _canvasOffscreen.getContext('2d').drawImage(canvas, 0, 0);
+    _canvasRenderData = { imgX, imgY, imgDrawWidth, imgDrawHeight, cW, cH, maskRows, maskCols };
+
+    // Feature 1: hover crosshair + 3D highlight
+    setupCanvasHover(canvas);
   };
+  // Reset zoom for new file
+  _canvasZoomCurrent = { scale: 1, tx: 0, ty: 0 };
+  _canvasZoomTarget  = { scale: 1, tx: 0, ty: 0 };
+  _canvasHighlightRect = null;
   img.src = 'data:image/png;base64,' + data.original_image;
 }
 
@@ -733,6 +1550,7 @@ function renderTerrain(data) {
   const rows    = probMap.length;
   const cols    = probMap[0].length;
 
+  // ── Scene + main renderer ─────────────────────────────────────────────────
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0d0d);
 
@@ -740,10 +1558,13 @@ function renderTerrain(data) {
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
+  renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
   _renderer = renderer;
 
   const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+  _camera = camera;
 
+  // ── Geometry — full probability_map resolution ────────────────────────────
   const scaleX      = cols;
   const scaleZ      = rows;
   const heightScale = Math.max(cols, rows) * 0.35;
@@ -762,15 +1583,15 @@ function renderTerrain(data) {
       positions[idx]   = (col / (cols - 1) - 0.5) * scaleX;
       positions[idx+1] = h;
       positions[idx+2] = (row / (rows - 1) - 0.5) * scaleZ;
-      const [r,g,b] = hotColor(v);
-      colors[idx]=r; colors[idx+1]=g; colors[idx+2]=b;
+      const [r, g, b] = hotColor(v);
+      colors[idx] = r; colors[idx+1] = g; colors[idx+2] = b;
     }
   }
 
   for (let row = 0; row < rows - 1; row++) {
     for (let col = 0; col < cols - 1; col++) {
       const tl = row * cols + col;
-      indices.push(tl, tl+cols, tl+1, tl+1, tl+cols, tl+cols+1);
+      indices.push(tl, tl + cols, tl + 1, tl + 1, tl + cols, tl + cols + 1);
     }
   }
 
@@ -780,59 +1601,135 @@ function renderTerrain(data) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
 
-  scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+  geo.computeBoundingBox();
+  const bbox   = geo.boundingBox;
+  const center = new THREE.Vector3();
+  bbox.getCenter(center);
+  const bsize    = new THREE.Vector3();
+  bbox.getSize(bsize);
+  const diagonal = bsize.length();
+
+  // Feature 3: capture final Z heights, then reset to 0 for animation
+  _terrainFinalZ = new Float32Array(rows * cols);
+  _terrainRows = rows; _terrainCols = cols;
+  for (let i = 0; i < rows * cols; i++) _terrainFinalZ[i] = positions[i * 3 + 1];
+  for (let i = 0; i < rows * cols; i++) positions[i * 3 + 1] = 0;
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+
+  // ── Terrain mesh ──────────────────────────────────────────────────────────
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
     vertexColors: true, side: THREE.DoubleSide, roughness: 0.75, metalness: 0.1,
-  })));
+  }));
+  scene.add(mesh);
+  _terrainMesh = mesh;
+  _terrainGeo  = geo;
+  _terrainMinY = bbox.min.y;
+  _terrainMaxY = bbox.max.y;
+  _terrainClipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -bbox.min.y + 0.01);
+  renderer.localClippingEnabled = true;
+  mesh.material.clippingPlanes = [_terrainClipPlane];
+  // Start semi-transparent for Feature 3 reconstruction animation
+  mesh.material.transparent = true;
+  mesh.material.opacity = 0.5;
 
-  const linePos = [];
-  const contourY = maxH + heightScale * 0.03;
-  const xStep = scaleX / (cols - 1);
-  const zStep = scaleZ / (rows - 1);
+  // ── Ground reference plane ────────────────────────────────────────────────
+  const groundSize = Math.max(scaleX, scaleZ) * 1.8;
+  const groundGeo  = new THREE.PlaneGeometry(groundSize, groundSize);
+  groundGeo.rotateX(-Math.PI / 2);
+  const ground = new THREE.Mesh(groundGeo, new THREE.MeshBasicMaterial({
+    color: 0x111111, opacity: 0.4, transparent: true,
+  }));
+  ground.position.set(center.x, bbox.min.y - 0.1, center.z);
+  scene.add(ground);
 
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const here = mask[row][col];
-      if (col + 1 < cols && mask[row][col+1] !== here) {
-        const x  = (col / (cols-1) - 0.5) * scaleX + xStep * 0.5;
-        const z0 = (row / (rows-1) - 0.5) * scaleZ;
-        linePos.push(x, contourY, z0,  x, contourY, z0 + zStep);
-      }
-      if (row + 1 < rows && mask[row+1][col] !== here) {
-        const z  = (row / (rows-1) - 0.5) * scaleZ + zStep * 0.5;
-        const x0 = (col / (cols-1) - 0.5) * scaleX;
-        linePos.push(x0, contourY, z,  x0 + xStep, contourY, z);
-      }
-    }
-  }
-
-  if (linePos.length > 0) {
-    const lg = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
-    const lineColor = new THREE.Color(badgeFor(data.anatomy).text);
-    scene.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: lineColor })));
-  }
-
+  // ── Lights ────────────────────────────────────────────────────────────────
   scene.add(new THREE.AmbientLight(0x666666, 1.2));
   const sun = new THREE.DirectionalLight(0xffffff, 1.8);
   sun.position.set(scaleX * 0.6, heightScale * 2.5, scaleZ * 0.3);
   scene.add(sun);
-  const fill = new THREE.DirectionalLight(0x2244aa, 0.4);
-  fill.position.set(-scaleX * 0.5, heightScale, -scaleZ * 0.5);
-  scene.add(fill);
+  const fillLight = new THREE.DirectionalLight(0x2244aa, 0.4);
+  fillLight.position.set(-scaleX * 0.5, heightScale, -scaleZ * 0.5);
+  scene.add(fillLight);
 
-  const camDist = Math.max(scaleX, scaleZ) * 1.1;
-  camera.position.set(camDist * 0.75, maxH + heightScale * 0.9, camDist * 0.75);
-  const target = new THREE.Vector3(0, maxH * 0.25, 0);
-  camera.lookAt(target);
+  // ── Ground grid at base of terrain ───────────────────────────────────────
+  const gridSize = Math.max(scaleX, scaleZ) * 1.6;
+  const grid = new THREE.GridHelper(gridSize, 20, 0x1a1a1a, 0x1a1a1a);
+  grid.position.copy(center);
+  grid.position.y = bbox.min.y - 0.5;
+  scene.add(grid);
 
+  // ── OrbitControls + auto-rotation ────────────────────────────────────────
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.copy(target);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.minDistance = 10;
-  controls.maxDistance = camDist * 4;
+  controls.target.copy(center);
+  controls.enableDamping  = true;
+  controls.dampingFactor  = 0.06;
+  controls.minDistance    = diagonal * 0.05;
+  controls.maxDistance    = diagonal * 6;
+  controls.autoRotate      = true;
+  controls.autoRotateSpeed = 5.0;
   controls.update();
+  setTimeout(() => { controls.autoRotate = false; }, 3000);
 
+  // ── Axis indicator — 80×80 inset, bottom-left ─────────────────────────────
+  const axisWrap = document.createElement('div');
+  axisWrap.style.cssText = 'position:absolute;bottom:10px;left:10px;width:80px;height:80px;pointer-events:none;';
+  container.appendChild(axisWrap);
+
+  const axisRend = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  axisRend.setSize(80, 80);
+  axisRend.setPixelRatio(window.devicePixelRatio);
+  axisWrap.appendChild(axisRend.domElement);
+  _axisRenderer = axisRend;
+
+  const axisScene  = new THREE.Scene();
+  _axisScene  = axisScene;
+  const axisCam = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+  _axisCamera = axisCam;
+  axisScene.add(new THREE.AmbientLight(0xffffff, 3));
+
+  const orig3 = new THREE.Vector3(0, 0, 0);
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), orig3, 0.7, 0xff3333, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), orig3, 0.7, 0x33cc33, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), orig3, 0.7, 0x3366ff, 0.18, 0.09));
+
+  // ── Colorbar — right edge, vertically centered ────────────────────────────
+  const cbWrap = document.createElement('div');
+  cbWrap.style.cssText = 'position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none;';
+
+  const mkLbl = html => {
+    const d = document.createElement('div');
+    d.style.cssText = "font-family:'DM Mono',monospace;font-size:8px;color:#b85535;text-align:center;line-height:1.35;letter-spacing:0.3px;";
+    d.innerHTML = html;
+    return d;
+  };
+
+  const cbCanvas = document.createElement('canvas');
+  cbCanvas.width = 14; cbCanvas.height = 110;
+  cbCanvas.style.cssText = 'border-radius:2px;border:1px solid rgba(184,85,53,0.2);';
+  const cbCtx = cbCanvas.getContext('2d');
+  // bottom of canvas = t=0 (black), top = t=1 (white) — matches hotColor()
+  const cbGrad = cbCtx.createLinearGradient(0, 110, 0, 0);
+  cbGrad.addColorStop(0,     '#000000');
+  cbGrad.addColorStop(0.365, '#ff0000');
+  cbGrad.addColorStop(0.745, '#ffff00');
+  cbGrad.addColorStop(1.0,   '#ffffff');
+  cbCtx.fillStyle = cbGrad;
+  cbCtx.fillRect(0, 0, 14, 110);
+
+  cbWrap.appendChild(mkLbl('High<br>probability'));
+  cbWrap.appendChild(cbCanvas);
+  cbWrap.appendChild(mkLbl('Low<br>probability'));
+  container.appendChild(cbWrap);
+
+  // ── "Drag to rotate" tooltip — fades after 3 s ────────────────────────────
+  const tip = document.createElement('div');
+  tip.style.cssText = "position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-family:'DM Mono',monospace;font-size:10px;color:rgba(184,85,53,0.9);background:rgba(0,0,0,0.55);padding:4px 12px;border-radius:4px;pointer-events:none;transition:opacity 1.5s ease;white-space:nowrap;";
+  tip.textContent = 'drag to rotate';
+  container.appendChild(tip);
+  setTimeout(() => { tip.style.opacity = '0'; }, 2500);
+
+  // ── Resize observer ───────────────────────────────────────────────────────
   _resizeObs = new ResizeObserver(() => {
     const nW = container.clientWidth;
     const nH = container.clientHeight;
@@ -843,12 +1740,486 @@ function renderTerrain(data) {
   });
   _resizeObs.observe(container);
 
+  // ── Animate ───────────────────────────────────────────────────────────────
   function animate() {
     _animId = requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+
+    // Axis indicator: position camera behind the scene's origin, matching main camera orientation
+    axisCam.position.set(0, 0, 0);
+    axisCam.quaternion.copy(camera.quaternion);
+    axisCam.translateZ(2);
+    axisRend.render(axisScene, axisCam);
   }
   animate();
+
+  // Features 2, 3, 4
+  setupTerrainClick(renderer, camera, mesh, rows, cols);
+  startReconstructionAnimation(mesh, geo, rows, cols);
+
+  // Final camera framing — deferred so container has its actual rendered dimensions
+  setTimeout(() => {
+    const box = new THREE.Box3().setFromObject(mesh);
+    const bCenter = new THREE.Vector3();
+    box.getCenter(bCenter);
+    const bSize = new THREE.Vector3();
+    box.getSize(bSize);
+
+    camera.near   = 0.01;
+    camera.far    = bSize.length() * 10;
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    camera.position.set(bCenter.x, bCenter.y - bSize.y * 2, bCenter.z + bSize.z * 1.5);
+    camera.lookAt(bCenter);
+
+    controls.target.copy(bCenter);
+    controls.update();
+  }, 100);
+}
+
+// ── Transfer function colormaps ───────────────────────────────────────────────
+
+function presetColor(preset, t) {
+  t = Math.max(0, Math.min(1, t));
+  let r, g, b, s;
+  if (preset === 'SOFT TISSUE') {
+    if (t < 0.365) {
+      s = t / 0.365;
+      r = s * 0.45; g = 0; b = s * 0.55;
+    } else if (t < 0.745) {
+      s = (t - 0.365) / 0.38;
+      r = 0.45 + s * 0.50; g = 0; b = 0.55 + s * 0.30;
+    } else {
+      s = (t - 0.745) / 0.255;
+      r = 0.95; g = s * 0.85; b = 0.85 + s * 0.15;
+    }
+  } else if (preset === 'VASCULAR') {
+    if (t < 0.365) {
+      s = t / 0.365;
+      r = 0; g = 0; b = s;
+    } else if (t < 0.745) {
+      s = (t - 0.365) / 0.38;
+      r = 0; g = s; b = 1;
+    } else {
+      s = (t - 0.745) / 0.255;
+      r = s; g = 1; b = 1;
+    }
+  } else if (preset === 'BONE') {
+    r = t; g = t; b = t;
+  } else {
+    return hotColor(t);
+  }
+  return [r, g, b];
+}
+
+function applyPreset(preset) {
+  _currentPreset = preset;
+  if (!_terrainGeo || !_currentData) return;
+  const probMap = _currentData.probability_map;
+  const rows_   = probMap.length;
+  const cols_   = probMap[0].length;
+  const colAttr = _terrainGeo.attributes.color;
+  for (let row = 0; row < rows_; row++) {
+    for (let col = 0; col < cols_; col++) {
+      const i = (row * cols_ + col) * 3;
+      const [r, g, b] = presetColor(preset, probMap[row][col]);
+      colAttr.array[i] = r; colAttr.array[i+1] = g; colAttr.array[i+2] = b;
+    }
+  }
+  colAttr.needsUpdate = true;
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.preset === preset);
+  });
+}
+
+function drawSliceLine(pct) {
+  if (!_canvasCoords || !_currentData) return;
+  const { imgX, imgY, imgDrawWidth, imgDrawHeight, cW, cH } = _canvasCoords;
+  const maskRows = _currentData.probability_map.length;
+  const rowIdx   = Math.round(pct / 100 * (maskRows - 1));
+  const lineY    = imgY + (rowIdx / maskRows) * imgDrawHeight;
+
+  let overlay = document.getElementById('slice-line-overlay');
+  if (!overlay) {
+    overlay = document.createElement('canvas');
+    overlay.id = 'slice-line-overlay';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+    document.getElementById('scan-canvas').parentElement.appendChild(overlay);
+  }
+  overlay.width  = cW;
+  overlay.height = cH;
+  const octx = overlay.getContext('2d');
+  octx.clearRect(0, 0, cW, cH);
+  if (pct > 0) {
+    octx.strokeStyle = 'rgba(184,85,53,0.9)';
+    octx.lineWidth   = 1.5;
+    octx.setLineDash([5, 3]);
+    octx.beginPath();
+    octx.moveTo(imgX, lineY);
+    octx.lineTo(imgX + imgDrawWidth, lineY);
+    octx.stroke();
+  }
+}
+
+function setupControls(data) {
+  // ── Opacity ──────────────────────────────────────────────────────────────
+  const opSlider = document.getElementById('ctrl-opacity');
+  const opVal    = document.getElementById('ctrl-opacity-val');
+  opSlider.value = 100;
+  opVal.textContent = '100%';
+  opSlider.oninput = () => {
+    opVal.textContent = opSlider.value + '%';
+    if (_terrainMesh) {
+      const op = opSlider.value / 100;
+      _terrainMesh.material.transparent = op < 1;
+      _terrainMesh.material.opacity = op;
+    }
+  };
+
+  // ── Transfer function presets ─────────────────────────────────────────────
+  const ANATOMY_PRESET = {
+    JugularVein:      'VASCULAR', CarotidArtery:    'VASCULAR', FemoralArtery:    'VASCULAR',
+    Heart:            'SOFT TISSUE', LIDC:           'BONE',
+    'Jugular Vein':   'VASCULAR', 'Carotid Artery': 'VASCULAR', 'Femoral Artery': 'VASCULAR',
+    'Lung / CT':      'BONE',
+    Breast:           'SOFT TISSUE', Thyroid:        'SOFT TISSUE', Abdomen:        'SOFT TISSUE',
+  };
+  applyPreset(ANATOMY_PRESET[data.anatomy] || 'RAW');
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.onclick = () => applyPreset(btn.dataset.preset);
+  });
+
+  // ── Axial slice ───────────────────────────────────────────────────────────
+  const isVolume      = data.dimensionality === '3D_volume';
+  const sliceSection  = document.getElementById('ctrl-slice-section');
+  const sliceDiv      = document.getElementById('ctrl-slice-div');
+  sliceSection.style.display = isVolume ? 'none' : '';
+  sliceDiv.style.display     = isVolume ? 'none' : '';
+
+  const sliceSlider = document.getElementById('ctrl-slice');
+  const sliceVal    = document.getElementById('ctrl-slice-val');
+  sliceSlider.value = 0;
+  sliceVal.textContent = '0%';
+  if (_terrainClipPlane) _terrainClipPlane.constant = -_terrainMinY + 0.01;
+
+  sliceSlider.oninput = () => {
+    const pct = parseInt(sliceSlider.value);
+    sliceVal.textContent = pct + '%';
+    if (_terrainClipPlane) {
+      const y = _terrainMinY + (_terrainMaxY - _terrainMinY) * pct / 100;
+      _terrainClipPlane.constant = -y;
+    }
+    drawSliceLine(pct);
+  };
+
+  // ── Time scrubber — hidden (server returns single representative frame) ───
+  document.getElementById('ctrl-time-section').style.display = 'none';
+  document.getElementById('ctrl-time-div').style.display     = 'none';
+}
+
+// ── Feature 1 & 2: Canvas helpers ────────────────────────────────────────────
+
+function redrawCanvas2D() {
+  if (!_canvasOffscreen || !_canvasRenderData) return;
+  const canvas = document.getElementById('scan-canvas');
+  const ctx = canvas.getContext('2d');
+  const { cW, cH, imgX, imgY, imgDrawWidth, imgDrawHeight, maskCols, maskRows } = _canvasRenderData;
+  const { scale, tx, ty } = _canvasZoomCurrent;
+  ctx.clearRect(0, 0, cW, cH);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, cW, cH);
+  ctx.save();
+  ctx.translate(tx, ty);
+  ctx.scale(scale, scale);
+  ctx.drawImage(_canvasOffscreen, 0, 0);
+  if (_canvasHighlightRect) {
+    const { row, col } = _canvasHighlightRect;
+    const hx = imgX + (col / maskCols) * imgDrawWidth;
+    const hy = imgY + (row / maskRows) * imgDrawHeight;
+    ctx.strokeStyle = '#b85535';
+    ctx.lineWidth = 2 / scale;
+    ctx.lineJoin = 'round';
+    ctx.strokeRect(hx - 20, hy - 20, 40, 40);
+  }
+  ctx.restore();
+}
+
+function animateCanvasZoom(onDone) {
+  const s0 = { ...  _canvasZoomCurrent };
+  const s1 = { ...  _canvasZoomTarget };
+  const t0 = performance.now();
+  const dur = 300;
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  function step(now) {
+    const t = Math.min(1, (now - t0) / dur);
+    const e = ease(t);
+    _canvasZoomCurrent.scale = s0.scale + (s1.scale - s0.scale) * e;
+    _canvasZoomCurrent.tx   = s0.tx + (s1.tx - s0.tx) * e;
+    _canvasZoomCurrent.ty   = s0.ty + (s1.ty - s0.ty) * e;
+    redrawCanvas2D();
+    if (t < 1) { _canvasZoomAnimId = requestAnimationFrame(step); }
+    else { _canvasZoomAnimId = null; if (onDone) onDone(); }
+  }
+  if (_canvasZoomAnimId) cancelAnimationFrame(_canvasZoomAnimId);
+  _canvasZoomAnimId = requestAnimationFrame(step);
+}
+
+function showCanvasResetBtn() {
+  if (document.getElementById('canvas-reset-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'canvas-reset-btn';
+  btn.textContent = 'Reset view';
+  btn.style.cssText = 'position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:10px;letter-spacing:0.3px;padding:5px 10px;background:rgba(13,13,13,0.78);color:#b85535;border:1px solid rgba(184,85,53,0.45);border-radius:4px;cursor:pointer;z-index:10;';
+  btn.onclick = () => {
+    _canvasZoomTarget = { scale: 1, tx: 0, ty: 0 };
+    _canvasHighlightRect = null;
+    animateCanvasZoom(() => btn.remove());
+  };
+  document.querySelector('.panel-canvas-wrap').appendChild(btn);
+}
+
+function restoreHoverVerts() {
+  if (!_terrainGeo || _hoverHighlightedVerts.length === 0 || !_currentData) return;
+  const colAttr = _terrainGeo.attributes.color;
+  const probMap = _currentData.probability_map;
+  for (const { row, col } of _hoverHighlightedVerts) {
+    if (row < 0 || col < 0 || row >= _terrainRows || col >= _terrainCols) continue;
+    const idx = row * _terrainCols + col;
+    const [r, g, b] = presetColor(_currentPreset, probMap[row][col]);
+    colAttr.array[idx*3] = r; colAttr.array[idx*3+1] = g; colAttr.array[idx*3+2] = b;
+  }
+  colAttr.needsUpdate = true;
+  _hoverHighlightedVerts = [];
+}
+
+function highlight3DVertex(row, col) {
+  if (!_terrainGeo || !_currentData) return;
+  restoreHoverVerts();
+  const colAttr = _terrainGeo.attributes.color;
+  const neighbors = [];
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const nr = row + dr, nc = col + dc;
+      if (nr >= 0 && nr < _terrainRows && nc >= 0 && nc < _terrainCols) neighbors.push({ row: nr, col: nc });
+    }
+  }
+  _hoverHighlightedVerts = neighbors;
+  for (const { row: nr, col: nc } of neighbors) {
+    const idx = nr * _terrainCols + nc;
+    colAttr.array[idx*3] = 1; colAttr.array[idx*3+1] = 1; colAttr.array[idx*3+2] = 1;
+  }
+  colAttr.needsUpdate = true;
+}
+
+function setupCanvasHover(canvas) {
+  const hoCanvas = document.createElement('canvas');
+  hoCanvas.id = 'hover-crosshair-overlay';
+  hoCanvas.width  = canvas.width;
+  hoCanvas.height = canvas.height;
+  hoCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+  canvas.parentElement.appendChild(hoCanvas);
+  canvas.style.cursor = 'crosshair';
+
+  canvas.addEventListener('mousemove', e => {
+    if (!_canvasRenderData) return;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (e.clientX - rect.left) * (canvas.width  / rect.width);
+    const canvasY = (e.clientY - rect.top)  * (canvas.height / rect.height);
+
+    // Draw crosshair at screen position
+    const hctx = hoCanvas.getContext('2d');
+    hctx.clearRect(0, 0, hoCanvas.width, hoCanvas.height);
+    hctx.strokeStyle = '#b85535';
+    hctx.lineWidth = 1.5;
+    hctx.setLineDash([]);
+    hctx.beginPath();
+    hctx.moveTo(canvasX - 10, canvasY); hctx.lineTo(canvasX + 10, canvasY);
+    hctx.moveTo(canvasX, canvasY - 10); hctx.lineTo(canvasX, canvasY + 10);
+    hctx.stroke();
+
+    // Map to prob_map pixel (accounting for zoom transform)
+    const { scale, tx, ty } = _canvasZoomCurrent;
+    const logX = (canvasX - tx) / scale;
+    const logY = (canvasY - ty) / scale;
+    const { imgX, imgY, imgDrawWidth, imgDrawHeight, maskCols, maskRows } = _canvasRenderData;
+    if (logX < imgX || logX > imgX + imgDrawWidth || logY < imgY || logY > imgY + imgDrawHeight) {
+      restoreHoverVerts(); return;
+    }
+    const col = Math.max(0, Math.min(maskCols - 1, Math.floor((logX - imgX) / imgDrawWidth * maskCols)));
+    const row = Math.max(0, Math.min(maskRows - 1, Math.floor((logY - imgY) / imgDrawHeight * maskRows)));
+    highlight3DVertex(row, col);
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoCanvas.getContext('2d').clearRect(0, 0, hoCanvas.width, hoCanvas.height);
+    restoreHoverVerts();
+  });
+}
+
+function setupTerrainClick(renderer, camera, mesh, rows, cols) {
+  _raycaster = new THREE.Raycaster();
+  renderer.domElement.addEventListener('click', e => {
+    if (!_canvasRenderData || !_raycaster) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+       ((e.clientX - rect.left) / rect.width)  * 2 - 1,
+      -((e.clientY - rect.top)  / rect.height) * 2 + 1
+    );
+    _raycaster.setFromCamera(mouse, camera);
+    const hits = _raycaster.intersectObject(mesh);
+    if (!hits.length) return;
+    const vertIdx = hits[0].face.a;
+    const hitRow = Math.max(0, Math.min(rows - 1, Math.floor(vertIdx / cols)));
+    const hitCol = Math.max(0, Math.min(cols - 1, vertIdx % cols));
+    const { imgX, imgY, imgDrawWidth, imgDrawHeight, cW, cH } = _canvasRenderData;
+    const cx = imgX + (hitCol / cols) * imgDrawWidth;
+    const cy = imgY + (hitRow / rows) * imgDrawHeight;
+    _canvasHighlightRect = { row: hitRow, col: hitCol };
+    _canvasZoomTarget = { scale: 2.5, tx: cW / 2 - cx * 2.5, ty: cH / 2 - cy * 2.5 };
+    animateCanvasZoom();
+    showCanvasResetBtn();
+  });
+}
+
+// ── Feature 3: Reconstruction animation ──────────────────────────────────────
+
+function startReconstructionAnimation(mesh, geo, rows, cols) {
+  _animAbort = false;
+  const posAttr = geo.attributes.position;
+  const p1Duration = 800;
+  const p1Start = performance.now();
+
+  function phase1(now) {
+    if (_animAbort) return;
+    const t = Math.min(1, (now - p1Start) / p1Duration);
+    const upToRow = Math.floor(t * rows);
+    for (let row = 0; row <= upToRow && row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        posAttr.array[(row * cols + col) * 3 + 1] = _terrainFinalZ[row * cols + col];
+      }
+    }
+    posAttr.needsUpdate = true;
+    if (t < 1) { requestAnimationFrame(phase1); }
+    else { geo.computeVertexNormals(); phase2(); }
+  }
+
+  function phase2() {
+    const p2Duration = 200;
+    const p2Start = performance.now();
+    function step(now) {
+      if (_animAbort) return;
+      const t = Math.min(1, (now - p2Start) / p2Duration);
+      const sf = 1.15 - 0.15 * (1 - Math.pow(1 - t, 3));
+      for (let i = 0; i < rows * cols; i++) posAttr.array[i * 3 + 1] = _terrainFinalZ[i] * sf;
+      posAttr.needsUpdate = true;
+      if (t < 1) { requestAnimationFrame(step); }
+      else {
+        for (let i = 0; i < rows * cols; i++) posAttr.array[i * 3 + 1] = _terrainFinalZ[i];
+        posAttr.needsUpdate = true;
+        geo.computeVertexNormals();
+        phase3();
+      }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function phase3() {
+    const p3Duration = 300;
+    const p3Start = performance.now();
+    function step(now) {
+      if (_animAbort) return;
+      const t = Math.min(1, (now - p3Start) / p3Duration);
+      mesh.material.opacity = 0.5 + 0.5 * t;
+      if (t < 1) { requestAnimationFrame(step); }
+      else {
+        mesh.material.transparent = false;
+        mesh.material.opacity = 1.0;
+        startHardeningAnimation(mesh, geo, rows, cols);
+      }
+    }
+    requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(phase1);
+}
+
+// ── Feature 4: Hardening animation ───────────────────────────────────────────
+
+function startHardeningAnimation(mesh, geo, rows, cols) {
+  if (_animAbort) return;
+  const colAttr = geo.attributes.color;
+  const nVerts = rows * cols;
+
+  // Capture current colors (set by applyPreset) as final target
+  const finalColors = new Float32Array(colAttr.array);
+
+  // Reset all to flat grey
+  const grey = 0.533;
+  for (let i = 0; i < nVerts * 3; i++) colAttr.array[i] = grey;
+  colAttr.needsUpdate = true;
+
+  // Sort by Z height descending (highest peaks transition first)
+  const sortedByZ = Array.from({ length: nVerts }, (_, i) => i)
+    .sort((a, b) => (_terrainFinalZ[b] || 0) - (_terrainFinalZ[a] || 0));
+
+  const staggerWindow = 400;
+  const hardDuration  = 600;
+  const hStart = performance.now();
+
+  function hardStep(now) {
+    if (_animAbort) return;
+    const elapsed = now - hStart;
+    const nv1 = Math.max(nVerts - 1, 1);
+    for (let rank = 0; rank < nVerts; rank++) {
+      const idx = sortedByZ[rank];
+      const delay = (rank / nv1) * staggerWindow;
+      const t = Math.max(0, Math.min(1, (elapsed - delay) / (hardDuration - staggerWindow)));
+      colAttr.array[idx*3]   = grey + (finalColors[idx*3]   - grey) * t;
+      colAttr.array[idx*3+1] = grey + (finalColors[idx*3+1] - grey) * t;
+      colAttr.array[idx*3+2] = grey + (finalColors[idx*3+2] - grey) * t;
+    }
+    colAttr.needsUpdate = true;
+    if (elapsed < hardDuration) { requestAnimationFrame(hardStep); }
+    else {
+      for (let i = 0; i < nVerts * 3; i++) colAttr.array[i] = finalColors[i];
+      colAttr.needsUpdate = true;
+      const cov = parseFloat((_currentData && _currentData.coverage) || '0') || 0;
+      if (cov > 3) startPulse(geo, finalColors, nVerts);
+    }
+  }
+  requestAnimationFrame(hardStep);
+}
+
+function startPulse(geo, finalColors, nVerts) {
+  if (_animAbort || !_terrainFinalZ) return;
+  const colAttr = geo.attributes.color;
+  const sorted = Array.from({ length: nVerts }, (_, i) => i)
+    .sort((a, b) => (_terrainFinalZ[b] || 0) - (_terrainFinalZ[a] || 0));
+  const topVerts = sorted.slice(0, Math.max(1, Math.floor(nVerts * 0.1)));
+  const pulseDur = 300;
+  const pStart = performance.now();
+  function step(now) {
+    if (_animAbort) return;
+    const t = Math.min(1, (now - pStart) / pulseDur);
+    const flash = 1 - t;
+    for (const idx of topVerts) {
+      colAttr.array[idx*3]   = finalColors[idx*3]   + (1 - finalColors[idx*3])   * flash;
+      colAttr.array[idx*3+1] = finalColors[idx*3+1] + (1 - finalColors[idx*3+1]) * flash;
+      colAttr.array[idx*3+2] = finalColors[idx*3+2] + (1 - finalColors[idx*3+2]) * flash;
+    }
+    colAttr.needsUpdate = true;
+    if (t < 1) { requestAnimationFrame(step); }
+    else {
+      for (const idx of topVerts) {
+        colAttr.array[idx*3]   = finalColors[idx*3];
+        colAttr.array[idx*3+1] = finalColors[idx*3+1];
+        colAttr.array[idx*3+2] = finalColors[idx*3+2];
+      }
+      colAttr.needsUpdate = true;
+    }
+  }
+  requestAnimationFrame(step);
 }
 
 window.__handleFile = handleFile;
