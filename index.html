@@ -2775,6 +2775,72 @@ function showPulse(pulseData) {
   };
 }
 
+function stopPulsePlayback() {
+  if (_pulsePlayTimer !== null) {
+    clearInterval(_pulsePlayTimer);
+    _pulsePlayTimer = null;
+  }
+  const btn = document.getElementById('pulse-playpause');
+  if (btn) btn.innerHTML = '&#9654;';
+}
+
+function startPulsePlayback(pulseData) {
+  stopPulsePlayback();
+  const fps = pulseData.fps * _pulseSpeed;
+  const interval = Math.max(16, 1000 / fps);
+  _pulsePlayTimer = setInterval(() => {
+    let next = _pulseFrame + 1;
+    if (next >= pulseData.frame_count) {
+      if (_pulseLooping) { next = 0; }
+      else { stopPulsePlayback(); return; }
+    }
+    updatePulseFrame(next);
+  }, interval);
+  const btn = document.getElementById('pulse-playpause');
+  if (btn) btn.innerHTML = '&#9646;&#9646;';
+}
+
+function setupPulseControls(pulseData) {
+  const scrubber = document.getElementById('pulse-scrubber');
+  scrubber.max = pulseData.frame_count - 1;
+  scrubber.value = 0;
+  scrubber.oninput = () => {
+    stopPulsePlayback();
+    updatePulseFrame(parseInt(scrubber.value));
+  };
+
+  document.getElementById('pulse-playpause').onclick = () => {
+    if (_pulsePlayTimer !== null) { stopPulsePlayback(); }
+    else { startPulsePlayback(pulseData); }
+  };
+
+  document.querySelectorAll('.pulse-speed-btn').forEach(btn => {
+    btn.onclick = () => {
+      _pulseSpeed = parseFloat(btn.dataset.speed);
+      document.querySelectorAll('.pulse-speed-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (_pulsePlayTimer !== null) startPulsePlayback(pulseData);
+    };
+  });
+
+  const opSlider = document.getElementById('pulse-opacity');
+  const opVal    = document.getElementById('pulse-opacity-val');
+  opSlider.value = 100;
+  opVal.textContent = '100%';
+  opSlider.oninput = () => {
+    opVal.textContent = opSlider.value + '%';
+    if (typeof _terrainMesh !== 'undefined' && _terrainMesh) {
+      const op = opSlider.value / 100;
+      _terrainMesh.material.transparent = op < 1;
+      _terrainMesh.material.opacity = op;
+    }
+  };
+
+  document.querySelectorAll('#state-pulse .preset-btn').forEach(btn => {
+    btn.onclick = () => applyPreset(btn.dataset.preset);
+  });
+}
+
 window.__handleFile = handleFile;
 </script>
 </body>
