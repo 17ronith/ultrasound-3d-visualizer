@@ -2695,6 +2695,86 @@ function updatePulseFrame(idx) {
   renderPulseWaveform(_pulseData, _pulseFrame);
 }
 
+function renderPulseHeader(pulseData) {
+  const c = badgeFor('JugularVein');
+  document.getElementById('pulse-header-badges').innerHTML =
+    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">JugularVein</span>
+     <span class="badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">
+       ${pulseData.frame_count} frames &middot; ${pulseData.fps} fps
+     </span>`;
+}
+
+function renderPulseStats(pulseData) {
+  const TC = '#b85535';
+  const bpmText = pulseData.bpm != null ? `~${pulseData.bpm} BPM` : '—';
+  const bpmSub  = pulseData.bpm != null ? 'estimated from vessel area' : 'Insufficient peaks detected';
+  const avgArea = (pulseData.vessel_area_waveform.reduce((a, b) => a + b, 0) /
+                   pulseData.vessel_area_waveform.length * 100).toFixed(1);
+  document.getElementById('pulse-stats-row').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Anatomy</div>
+      <div class="stat-value" style="font-size:15px;color:#1d4ed8">JugularVein</div>
+      <div class="stat-sub">Temporal cine-loop · ${pulseData.duration_seconds.toFixed(2)}s</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Heart Rate</div>
+      <div class="stat-value" style="font-size:18px;color:${TC}">${bpmText}</div>
+      <div class="stat-sub">${bpmSub}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Peak Count</div>
+      <div class="stat-value">${pulseData.peak_frames.length}</div>
+      <div class="stat-sub">detected over ${pulseData.duration_seconds.toFixed(2)}s</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Mean Coverage</div>
+      <div class="stat-value">${avgArea}%</div>
+      <div class="stat-sub">mean detected area</div>
+    </div>`;
+}
+
+function renderPulseVarianceTerrain(pulseData) {
+  const terrainData = buildPulseTerrainData(pulseData);
+  _currentData = terrainData;
+  renderTerrain(terrainData, 'pulse-three-container');
+  setTimeout(() => applyPreset('VASCULAR'), 200);
+}
+
+function showPulse(pulseData) {
+  _pulseData    = pulseData;
+  _pulseFrame   = 0;
+  _pulseMmodeImageData = null;
+  _pulseVideoImg = null;
+  stopPulsePlayback();
+
+  showState('pulse');
+
+  renderPulseHeader(pulseData);
+  renderPulseStats(pulseData);
+  renderPulseVideo(pulseData);
+  buildMmodeImageData(pulseData);
+  renderPulseMmode(pulseData, 0);
+  renderPulseWaveform(pulseData, 0);
+  renderPulseVarianceTerrain(pulseData);
+  setupPulseControls(pulseData);
+
+  document.getElementById('pulse-waveform-canvas').onclick = (e) => {
+    const canvas = document.getElementById('pulse-waveform-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const pad = 8 * (rect.width / canvas.width);
+    const innerW = rect.width - pad * 2;
+    const innerFrac = Math.max(0, Math.min(1, (e.clientX - rect.left - pad) / innerW));
+    updatePulseFrame(Math.round(innerFrac * (_pulseData.frame_count - 1)));
+  };
+
+  document.getElementById('pulse-mmode-canvas').onclick = (e) => {
+    const canvas = document.getElementById('pulse-mmode-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const xFrac = (e.clientX - rect.left) / rect.width;
+    updatePulseFrame(Math.round(xFrac * (_pulseData.frame_count - 1)));
+  };
+}
+
 window.__handleFile = handleFile;
 </script>
 </body>
