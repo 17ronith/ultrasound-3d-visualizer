@@ -1,3 +1,4 @@
+import asyncio
 import os
 import io
 import re
@@ -244,10 +245,71 @@ async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optiona
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
+    MAX = 200
+
+    # Step 3 — Variance map
+    stack = np.stack([f.astype(np.float32) for f in raw_frames], axis=0)
+    variance_map = np.var(stack, axis=0)
+    v_min, v_max = variance_map.min(), variance_map.max()
+    variance_map = (variance_map - v_min) / max(v_max - v_min, 1e-6)
+    H, W = variance_map.shape
+    if H > MAX or W > MAX:
+        scale = MAX / max(H, W)
+        nH, nW = max(1, int(H * scale)), max(1, int(W * scale))
+        vm_img = PILImage.fromarray((variance_map * 255).clip(0, 255).astype(np.uint8))
+        variance_map_ds = np.array(vm_img.resize((nW, nH), PILImage.BILINEAR)).astype(np.float32) / 255.0
+    else:
+        nH, nW = H, W
+        variance_map_ds = variance_map.astype(np.float32)
+
+    # Step 4 — Vessel area waveform
+    vessel_areas = [float((pm > 0.5).sum()) for pm in prob_maps]
+    va_arr = np.array(vessel_areas, dtype=np.float32)
+    va_min, va_max = va_arr.min(), va_arr.max()
+    va_norm = (va_arr - va_min) / max(va_max - va_min, 1e-6)
+
+    # Step 5 — Mean probability map
+    mean_prob = np.mean(np.stack([pm.astype(np.float32) for pm in prob_maps], axis=0), axis=0)
+    if H > MAX or W > MAX:
+        mp_img = PILImage.fromarray((mean_prob * 255).clip(0, 255).astype(np.uint8))
+        mean_prob_ds = np.array(mp_img.resize((nW, nH), PILImage.BILINEAR)).astype(np.float32) / 255.0
+    else:
+        mean_prob_ds = mean_prob.astype(np.float32)
+
+    # Step 6 — Peak detection
+    peaks, _ = find_peaks(va_norm, height=0.3, distance=15)
+    peak_frames = peaks.tolist()
+    bpm = round((len(peak_frames) / duration_s) * 60, 1) if len(peak_frames) >= 2 else None
+
+    # Step 7 — M-mode
+    centroid_col = int(np.argmax(mean_prob.sum(axis=0)))
+    mmode = stack[:, :, centroid_col].astype(np.float32)
+    del stack  # free memory after extraction
+    mm_min, mm_max = mmode.min(), mmode.max()
+    mmode_norm = (mmode - mm_min) / max(mm_max - mm_min, 1e-6)
+    if mmode_norm.shape[1] > MAX:
+        mm_img = PILImage.fromarray((mmode_norm * 255).astype(np.uint8))
+        mm_ds = np.array(mm_img.resize((MAX, N), PILImage.BILINEAR)).astype(np.float32) / 255.0
+    else:
+        mm_ds = mmode_norm.astype(np.float32)
+
+    # Step 8 — Representative frame
+    rep_idx = peak_frames[len(peak_frames) // 2] if peak_frames else min(85, N - 1)
+    rep_frame = raw_frames[rep_idx]
+
+    return {
+        'variance_map_ds': variance_map_ds, 'nH': nH, 'nW': nW,
+        'va_norm': va_norm, 'mean_prob_ds': mean_prob_ds,
+        'peak_frames': peak_frames, 'bpm': bpm,
+        'centroid_col': centroid_col, 'mm_ds': mm_ds,
+        'rep_frame': rep_frame, 'H': H, 'W': W,
+    }
+
+
 @app.post('/analyze/pulse')
 async def analyze_pulse(sequence_dir: str = Form(...)):
     """Stream SSE progress events during 171-frame inference, then emit full payload."""
-    import asyncio
 
     async def generate():
         data_dir = Path(sequence_dir)
@@ -257,17 +319,27 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
 
         # Step 1 — Load frame list + timestamps
         mhd_files = sorted(
-            data_dir.glob('*.mhd'),
+            [p for p in data_dir.glob('*.mhd') if re.search(r'_(\d+)$', p.stem)],
             key=lambda p: int(re.search(r'_(\d+)$', p.stem).group(1))
         )
         N = len(mhd_files)
         ts_file = data_dir / 'timestamps.fts'
-        timestamps = [int(x.strip()) for x in ts_file.read_text().splitlines() if x.strip()]
+        timestamps = []
+        for x in ts_file.read_text().splitlines():
+            x = x.strip()
+            if x:
+                try:
+                    timestamps.append(int(x))
+                except ValueError:
+                    continue
+        if len(timestamps) < 2:
+            yield f"data: {json.dumps({'error': 'timestamps.fts has fewer than 2 entries'})}\n\n"
+            return
         duration_s = (timestamps[-1] - timestamps[0]) / 1000.0
         fps = (N - 1) / duration_s
 
         # Step 2 — Inference on all frames (blocking; run each in thread to not block event loop)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         t_infer_start = time.time()
         raw_frames: list[np.ndarray] = []
         prob_maps: list[np.ndarray] = []
@@ -281,7 +353,11 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
                 pm, bm, _ = run_inference(prep, frame_meta)
                 return frame_np.astype(np.uint8), np.asarray(pm).squeeze()
 
-            frame_np, pm = await loop.run_in_executor(None, _infer_frame)
+            try:
+                frame_np, pm = await loop.run_in_executor(None, _infer_frame)
+            except Exception as exc:
+                yield f"data: {json.dumps({'error': f'Frame {i} inference failed: {exc}'})}\n\n"
+                return
             raw_frames.append(frame_np)
             prob_maps.append(pm)
 
@@ -290,57 +366,23 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
 
         inference_time_ms = int((time.time() - t_infer_start) * 1000)
 
-        # Step 3 — Temporal variance map (318, 492) → normalize → downsample ≤200×200
-        stack = np.stack([f.astype(np.float32) for f in raw_frames], axis=0)  # (N,318,492)
-        variance_map = np.var(stack, axis=0)                                   # (318, 492)
-        v_min, v_max = variance_map.min(), variance_map.max()
-        variance_map = (variance_map - v_min) / max(v_max - v_min, 1e-6)
-        H, W = variance_map.shape
-        MAX = 200
-        if H > MAX or W > MAX:
-            scale = MAX / max(H, W)
-            nH, nW = max(1, int(H * scale)), max(1, int(W * scale))
-            vm_img = PILImage.fromarray((variance_map * 255).clip(0, 255).astype(np.uint8))
-            variance_map_ds = np.array(vm_img.resize((nW, nH), PILImage.BILINEAR)).astype(np.float32) / 255.0
-        else:
-            nH, nW = H, W
-            variance_map_ds = variance_map.astype(np.float32)
-
-        # Step 4 — Vessel area waveform (one value per frame, normalized 0-1)
-        vessel_areas = [float((pm > 0.5).sum()) for pm in prob_maps]
-        va_arr = np.array(vessel_areas, dtype=np.float32)
-        va_min, va_max = va_arr.min(), va_arr.max()
-        va_norm = (va_arr - va_min) / max(va_max - va_min, 1e-6)
-
-        # Step 5 — Mean probability map → downsample ≤200×200
-        mean_prob = np.mean(np.stack([pm.astype(np.float32) for pm in prob_maps], axis=0), axis=0)
-        if H > MAX or W > MAX:
-            mp_img = PILImage.fromarray((mean_prob * 255).clip(0, 255).astype(np.uint8))
-            mean_prob_ds = np.array(mp_img.resize((nW, nH), PILImage.BILINEAR)).astype(np.float32) / 255.0
-        else:
-            mean_prob_ds = mean_prob.astype(np.float32)
-
-        # Step 6 — Peak detection + BPM
-        peaks, _ = find_peaks(va_norm, height=0.3, distance=15)
-        peak_frames = peaks.tolist()
-        bpm = round((len(peak_frames) / duration_s) * 60, 1) if len(peak_frames) >= 2 else None
-
-        # Step 7 — M-mode: column at horizontal centroid of mean mask, shape (N, H)
-        centroid_col = int(np.argmax(mean_prob.sum(axis=0)))
-        mmode = stack[:, :, centroid_col].astype(np.float32)          # (N, 318)
-        mm_min, mm_max = mmode.min(), mmode.max()
-        mmode_norm = (mmode - mm_min) / max(mm_max - mm_min, 1e-6)
-        if mmode_norm.shape[1] > 200:
-            mm_img = PILImage.fromarray((mmode_norm * 255).astype(np.uint8))
-            mm_ds = np.array(mm_img.resize((200, N), PILImage.BILINEAR)).astype(np.float32) / 255.0
-        else:
-            mm_ds = mmode_norm.astype(np.float32)
-
-        # Step 8 — Representative frame (raw uint8, full 318×492)
-        rep_idx = peak_frames[len(peak_frames) // 2] if peak_frames else min(85, N - 1)
-        rep_frame = raw_frames[rep_idx]                                # (318, 492) uint8
+        # Steps 3–8 — Post-loop computation offloaded to executor
+        results = await loop.run_in_executor(
+            None, _compute_pulse_results, raw_frames, prob_maps, N, duration_s, fps
+        )
 
         # Step 9 — Final SSE event with full payload
+        variance_map_ds = results['variance_map_ds']
+        nH, nW = results['nH'], results['nW']
+        va_norm = results['va_norm']
+        mean_prob_ds = results['mean_prob_ds']
+        peak_frames = results['peak_frames']
+        bpm = results['bpm']
+        centroid_col = results['centroid_col']
+        mm_ds = results['mm_ds']
+        rep_frame = results['rep_frame']
+        H, W = results['H'], results['W']
+
         payload = {
             'done': True,
             'mode': 'pulse',
