@@ -978,9 +978,48 @@
   <div class="loading-wordmark">UltrasoundViz</div>
   <div class="loading-spinner"></div>
   <div class="loading-status" id="loading-status">Initializing…</div>
+  <div class="loading-progress-wrap" id="loading-progress-wrap" style="display:none">
+    <div class="loading-progress-fill" id="loading-progress-fill"></div>
+  </div>
 </div>
 
-<!-- ── State 3: Dashboard ─────────────────────────────────────────────────── -->
+<!-- ── State 3: Mode Select ──────────────────────────────────────────────── -->
+<div id="state-mode-select">
+  <a class="mode-back-link" id="mode-back-link">← Load different file</a>
+
+  <div class="mode-select-title">Choose analysis mode</div>
+
+  <div class="mode-cards">
+
+    <!-- Card 1: Single Frame -->
+    <div class="mode-card" id="mode-card-single">
+      <svg class="mode-card-icon" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="16" width="32" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/>
+        <line x1="6" y1="10" x2="38" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+        <line x1="6" y1="34" x2="38" y2="34" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+      </svg>
+      <div class="mode-card-title">Single Frame</div>
+      <div class="mode-card-desc">Analyze this frame with AI segmentation and explore as an interactive 3D probability terrain.</div>
+      <div class="mode-card-thumb"><canvas id="mode-thumb-canvas"></canvas></div>
+      <button class="mode-card-btn" id="mode-btn-single">Analyze Frame</button>
+    </div>
+
+    <!-- Card 2: Pulse Analysis -->
+    <div class="mode-card" id="mode-card-pulse">
+      <svg class="mode-card-icon" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polyline points="4,22 10,22 14,10 18,34 22,16 26,28 30,22 40,22"
+                  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="mode-card-title">Pulse Analysis</div>
+      <div class="mode-card-desc">Analyze all frames as a cine-loop, extract vessel pulsation waveform, detect heartbeat, and visualize tissue motion as a 3D variance terrain.</div>
+      <button class="mode-card-btn" id="mode-btn-pulse">Analyze Pulse</button>
+      <div class="mode-card-disabled-label" id="mode-pulse-disabled-label" style="display:none">No sequential frames detected</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── State 4: Dashboard ─────────────────────────────────────────────────── -->
 <div id="state-dashboard">
 
   <header class="dash-header">
@@ -1060,6 +1099,85 @@
     <span class="footer-info" id="footer-info"></span>
     <button class="btn-load-new" id="btn-load-new">← Load new file</button>
   </footer>
+
+</div>
+
+<!-- ── State 5: Pulse Mode ───────────────────────────────────────────────── -->
+<div id="state-pulse">
+
+  <!-- Top bar -->
+  <header class="dash-header">
+    <div style="display:flex;align-items:center;gap:18px;">
+      <a style="font-size:12px;font-weight:400;color:var(--muted);cursor:pointer;text-decoration:none;transition:color 0.15s;"
+         id="pulse-back-link"
+         onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
+        ← Back
+      </a>
+      <div class="brand">Ultrasound<span class="brand-accent">Viz</span></div>
+    </div>
+    <div class="header-badges" id="pulse-header-badges"></div>
+  </header>
+
+  <!-- Stats bar -->
+  <div class="pulse-stats-row" id="pulse-stats-row"></div>
+
+  <!-- Main panels -->
+  <div class="main-panels" style="padding:0;gap:0;">
+
+    <!-- Left: video + M-mode -->
+    <div class="pulse-left-panel">
+      <div class="pulse-video-wrap">
+        <canvas id="pulse-video-canvas"></canvas>
+        <canvas class="pulse-centroid-overlay" id="pulse-centroid-overlay"></canvas>
+        <div class="pulse-frame-counter" id="pulse-frame-counter">Frame 0 / 171</div>
+      </div>
+      <div class="pulse-mmode-wrap">
+        <canvas id="pulse-mmode-canvas"></canvas>
+        <div class="pulse-mmode-label">M-MODE — vessel cross-section over time</div>
+      </div>
+    </div>
+
+    <!-- Right: variance terrain -->
+    <div class="pulse-right-panel">
+      <div id="pulse-three-container"></div>
+    </div>
+
+  </div>
+
+  <!-- Waveform bar -->
+  <div class="pulse-waveform-bar">
+    <canvas id="pulse-waveform-canvas"></canvas>
+  </div>
+
+  <!-- Control bar -->
+  <div class="pulse-ctrl-bar">
+    <!-- Row 1: Playback -->
+    <div class="pulse-ctrl-row">
+      <button class="pulse-playpause" id="pulse-playpause">&#9654;</button>
+      <input type="range" class="pulse-scrubber" id="pulse-scrubber" min="0" max="170" value="0" step="1">
+      <span class="pulse-frame-label" id="pulse-frame-label">Frame 0 / 171</span>
+      <div style="display:flex;gap:5px;margin-left:8px;">
+        <button class="pulse-speed-btn" data-speed="0.25">0.25×</button>
+        <button class="pulse-speed-btn" data-speed="0.5">0.5×</button>
+        <button class="pulse-speed-btn active" data-speed="1">1×</button>
+        <button class="pulse-speed-btn" data-speed="2">2×</button>
+        <button class="pulse-speed-btn" data-speed="4">4×</button>
+      </div>
+    </div>
+    <!-- Row 2: Render controls -->
+    <div class="pulse-ctrl-row">
+      <span class="pulse-ctrl-label">Transfer Fn</span>
+      <button class="preset-btn" data-preset="RAW">RAW</button>
+      <button class="preset-btn" data-preset="SOFT TISSUE">SOFT TISSUE</button>
+      <button class="preset-btn active" data-preset="VASCULAR">VASCULAR</button>
+      <button class="preset-btn" data-preset="BONE">BONE</button>
+      <div style="margin-left:16px;display:flex;align-items:center;gap:8px;">
+        <span class="pulse-ctrl-label" style="min-width:auto;">Opacity</span>
+        <input type="range" class="pulse-scrubber" id="pulse-opacity" min="30" max="100" value="100" step="1" style="width:90px;flex:none;">
+        <span class="ctrl-val" id="pulse-opacity-val">100%</span>
+      </div>
+    </div>
+  </div>
 
 </div>
 
