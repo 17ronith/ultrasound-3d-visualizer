@@ -1167,9 +1167,9 @@
     <!-- Row 2: Render controls -->
     <div class="pulse-ctrl-row">
       <span class="pulse-ctrl-label">Transfer Fn</span>
-      <button class="preset-btn" data-preset="RAW">RAW</button>
+      <button class="preset-btn active" data-preset="RAW">RAW</button>
       <button class="preset-btn" data-preset="SOFT TISSUE">SOFT TISSUE</button>
-      <button class="preset-btn active" data-preset="VASCULAR">VASCULAR</button>
+      <button class="preset-btn" data-preset="VASCULAR">VASCULAR</button>
       <button class="preset-btn" data-preset="BONE">BONE</button>
       <div style="margin-left:16px;display:flex;align-items:center;gap:8px;">
         <span class="pulse-ctrl-label" style="min-width:auto;">Opacity</span>
@@ -1227,6 +1227,15 @@ let _pulseLooping = true;
 let _pulseVideoImg = null;
 let _pulseVideoCtx = null;
 let _pulseMmodeImageData = null;
+let _pulseFrameImages = null;
+let _pulseMaskImages  = null;
+let _pulseMaskCache   = null;
+let _pulseFrameStreamVersion = 0;
+let _pulseTubeMeshes = [];        // jugular + optional carotid mesh
+let _pulseDiscMesh   = null;      // scrubber sync disc
+let _pulseSmoothedJCx = null;     // Float64Array[N] smoothed jugular centroid_x
+let _pulseSmoothedJCy = null;     // Float64Array[N] smoothed jugular centroid_y
+let _pulseZScaleGlobal = 1;       // frame index → Z world-units multiplier
 let _terrainContainerId = 'three-container';
 let _modeSelectData = null;
 
@@ -1271,6 +1280,11 @@ function teardownThree() {
   const c = document.getElementById(_terrainContainerId);
   if (c) c.innerHTML = '';
   _terrainContainerId = 'three-container';
+  _pulseTubeMeshes = [];
+  _pulseDiscMesh = null;
+  _pulseSmoothedJCx = null;
+  _pulseSmoothedJCy = null;
+  _pulseZScaleGlobal = 1;
 }
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -1473,6 +1487,7 @@ document.getElementById('pulse-back-link').addEventListener('click', () => {
 });
 
 async function fetchPulseWithProgress(sequenceDir) {
+  _pulseFrameStreamVersion++;  // invalidate any previous background reader
   const fd = new FormData();
   fd.append('sequence_dir', sequenceDir);
   const res = await fetch('http://localhost:8000/analyze/pulse', { method: 'POST', body: fd });
@@ -1481,41 +1496,81 @@ async function fetchPulseWithProgress(sequenceDir) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let pulseData = null;
+  let phase2Buffer = '';
 
-  const stageMessages = [
-    'Computing pulsation variance…',
-    'Detecting pulse peaks…',
-    'Building M-mode…',
-    'Rendering…',
-  ];
-  let stageIdx = 0;
-
-  while (true) {
+  // Phase 1 — read until the done (metadata) event; capture any frame events in same chunk
+  outer: while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split('\n\n');
-    buffer = events.pop();
-    for (const event of events) {
+    buffer = events.pop();  // last incomplete element
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
       if (!event.startsWith('data: ')) continue;
       const json = JSON.parse(event.slice(6).trim());
       if (json.done) {
         setLoadingProgress(100);
-        return json;
+        _pulseFrameImages = new Array(json.frame_count).fill(null);
+        _pulseMaskImages  = new Array(json.frame_count).fill(null);
+        _pulseMaskCache   = new Map();
+        pulseData = json;
+        // Preserve any frame events that arrived in the same chunk after done
+        const rest = events.slice(i + 1);
+        phase2Buffer = (rest.length ? rest.join('\n\n') + '\n\n' : '') + buffer;
+        break outer;
       }
       if (json.error) throw new Error(json.error);
       if (json.progress !== undefined) {
         const pct = Math.round(json.progress / json.total * 100);
-        if (json.progress === json.total && stageIdx < stageMessages.length) {
-          setStatus(stageMessages[stageIdx++]);
-        } else {
-          setStatus(`Segmenting frame ${json.progress} / ${json.total}… (~60s total)`);
-        }
+        setStatus(`Segmenting frame ${json.progress} / ${json.total}…`);
         setLoadingProgress(pct * 0.9);
       }
     }
   }
-  throw new Error('SSE stream ended without final event');
+  if (!pulseData) throw new Error('SSE stream ended without final event');
+
+  // Phase 2 — continue reading frame events in background (non-blocking)
+  const myVersion = _pulseFrameStreamVersion;
+  _readPulseFrames(reader, decoder, phase2Buffer, pulseData, myVersion);
+  return pulseData;
+}
+
+async function _readPulseFrames(reader, decoder, initialBuffer, pulseData, version) {
+  let buffer = initialBuffer;
+  try {
+    while (true) {
+      if (version !== _pulseFrameStreamVersion) { reader.cancel(); return; }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for (const event of events) {
+        if (!event.startsWith('data: ')) continue;
+        const msg = JSON.parse(event.slice(6).trim());
+        if (msg.frame !== undefined) {
+          const img = new Image();
+          img.src = 'data:image/jpeg;base64,' + msg.frame_b64;
+          if (_pulseFrameImages) _pulseFrameImages[msg.frame] = img;
+          if (msg.mask_b64) {
+            const mimg = new Image();
+            mimg.src = 'data:image/jpeg;base64,' + msg.mask_b64;
+            if (_pulseMaskImages) _pulseMaskImages[msg.frame] = mimg;
+          }
+          if (msg.frame === 0) {
+            // _pulseVideoCtx may not exist yet (renderPulseVideo runs after showPulse);
+            // renderPulseVideo checks for a loaded img0 and will pick it up
+            img.onload = () => { if (_pulseVideoCtx) updatePulseVideoFrame(pulseData, 0); };
+            if (img.complete && _pulseVideoCtx) updatePulseVideoFrame(pulseData, 0);
+          }
+        } else if (msg.frames_done) {
+          return;
+        }
+      }
+    }
+  } catch (_) { /* stream cancelled or navigated away — ignore */ }
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -1977,9 +2032,9 @@ function renderTerrain(data, containerId = 'three-container') {
   cbCtx.fillStyle = cbGrad;
   cbCtx.fillRect(0, 0, 14, 110);
 
-  cbWrap.appendChild(mkLbl('High<br>probability'));
+  cbWrap.appendChild(mkLbl('High<br>motion'));
   cbWrap.appendChild(cbCanvas);
-  cbWrap.appendChild(mkLbl('Low<br>probability'));
+  cbWrap.appendChild(mkLbl('Static<br>tissue'));
   container.appendChild(cbWrap);
 
   // ── "Drag to rotate" tooltip — fades after 3 s ────────────────────────────
@@ -2513,51 +2568,73 @@ function renderPulseVideo(pulseData) {
   const wrap = canvas.parentElement;
   canvas.width  = wrap.clientWidth  || 400;
   canvas.height = wrap.clientHeight || 300;
-  const ctx = canvas.getContext('2d');
-  _pulseVideoCtx = ctx;
+  _pulseVideoCtx = canvas.getContext('2d');
+  _pulseVideoCtx.fillStyle = '#0d0d0d';
+  _pulseVideoCtx.fillRect(0, 0, canvas.width, canvas.height);
+  // Frame 0 may have already arrived via background streaming — render if ready
+  const img0 = _pulseFrameImages && _pulseFrameImages[0];
+  if (img0) {
+    if (img0.complete) {
+      updatePulseVideoFrame(pulseData, 0);
+    } else {
+      img0.onload = () => updatePulseVideoFrame(pulseData, 0);
+    }
+  }
+  // If img0 is null, _readPulseFrames will call updatePulseVideoFrame when frame 0 arrives
+}
+
+function updatePulseVideoFrame(pulseData, frameIdx) {
+  const canvas = document.getElementById('pulse-video-canvas');
+  const ctx = _pulseVideoCtx;
+  if (!ctx) return;
+
+  const img = _pulseFrameImages && _pulseFrameImages[frameIdx];
+  if (!img || !img.complete) return;
 
   const [fH, fW] = pulseData.representative_frame_shape;
-  const imgData = new ImageData(fW, fH);
-  for (let i = 0; i < fH * fW; i++) {
-    const v = pulseData.representative_frame[i];
-    imgData.data[i * 4]     = v;
-    imgData.data[i * 4 + 1] = v;
-    imgData.data[i * 4 + 2] = v;
-    imgData.data[i * 4 + 3] = 255;
-  }
-  const offCanvas = new OffscreenCanvas(fW, fH);
-  offCanvas.getContext('2d').putImageData(imgData, 0, 0);
+  const W = canvas.width, H = canvas.height;
+  const scale = Math.min(W / fW, H / fH);
+  const dx = (W - fW * scale) / 2;
+  const dy = (H - fH * scale) / 2;
 
-  createImageBitmap(offCanvas).then(bmp => {
-    ctx.fillStyle = '#0d0d0d';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const scale = Math.min(canvas.width / fW, canvas.height / fH);
-    const dx = (canvas.width  - fW * scale) / 2;
-    const dy = (canvas.height - fH * scale) / 2;
-    ctx.drawImage(bmp, dx, dy, fW * scale, fH * scale);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, dx, dy, fW * scale, fH * scale);
 
-    const [mpH, mpW] = pulseData.mean_probability_shape;
-    const cellW = (fW * scale) / mpW;
-    const cellH = (fH * scale) / mpH;
-    ctx.fillStyle = 'rgba(0,229,255,0.28)';
-    for (let r = 0; r < mpH; r++) {
-      for (let c = 0; c < mpW; c++) {
-        if (pulseData.mean_probability_map[r * mpW + c] > 0.5) {
-          ctx.fillRect(dx + c * cellW, dy + r * cellH, cellW, cellH);
+  const [mH, mW] = pulseData.mask_enc_shape;
+  if (_pulseMaskCache.has(frameIdx)) {
+    ctx.drawImage(_pulseMaskCache.get(frameIdx), dx, dy, fW * scale, fH * scale);
+  } else {
+    const maskImg = _pulseMaskImages && _pulseMaskImages[frameIdx];
+    if (maskImg && maskImg.complete) {
+      const offC = new OffscreenCanvas(mW, mH);
+      const oc = offC.getContext('2d');
+      oc.drawImage(maskImg, 0, 0, mW, mH);
+      const pxData = oc.getImageData(0, 0, mW, mH).data;
+      const overlayData = new ImageData(mW, mH);
+      for (let i = 0; i < mW * mH; i++) {
+        if (pxData[i * 4] > 128) {
+          overlayData.data[i * 4]     = 0;
+          overlayData.data[i * 4 + 1] = 229;
+          overlayData.data[i * 4 + 2] = 255;
+          overlayData.data[i * 4 + 3] = 71;
         }
       }
+      oc.putImageData(overlayData, 0, 0);
+      ctx.drawImage(offC, dx, dy, fW * scale, fH * scale);
+      createImageBitmap(overlayData).then(bmp => _pulseMaskCache.set(frameIdx, bmp));
     }
+  }
 
-    const lineX = dx + (pulseData.centroid_col / fW) * fW * scale;
-    ctx.strokeStyle = 'rgba(0,229,255,0.85)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(lineX, dy);
-    ctx.lineTo(lineX, dy + fH * scale);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  });
+  const lineX = dx + (pulseData.centroid_col / fW) * fW * scale;
+  ctx.strokeStyle = 'rgba(0,229,255,0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(lineX, dy);
+  ctx.lineTo(lineX, dy + fH * scale);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function buildMmodeImageData(pulseData) {
@@ -2683,6 +2760,7 @@ function renderPulseWaveform(pulseData, frameIdx) {
 function updatePulseFrame(idx) {
   if (!_pulseData) return;
   _pulseFrame = Math.max(0, Math.min(idx, _pulseData.frame_count - 1));
+  updatePulseVideoFrame(_pulseData, _pulseFrame);
 
   const scrubber = document.getElementById('pulse-scrubber');
   if (scrubber) scrubber.value = _pulseFrame;
@@ -2693,6 +2771,12 @@ function updatePulseFrame(idx) {
 
   renderPulseMmode(_pulseData, _pulseFrame);
   renderPulseWaveform(_pulseData, _pulseFrame);
+  if (_pulseDiscMesh && _pulseSmoothedJCx && _pulseSmoothedJCy) {
+    const f = _pulseFrame;
+    _pulseDiscMesh.position.x = _pulseSmoothedJCx[f] - 246;
+    _pulseDiscMesh.position.y = -(_pulseSmoothedJCy[f] - 159);
+    _pulseDiscMesh.position.z = f * _pulseZScaleGlobal;
+  }
 }
 
 function renderPulseHeader(pulseData) {
@@ -2733,11 +2817,356 @@ function renderPulseStats(pulseData) {
     </div>`;
 }
 
-function renderPulseVarianceTerrain(pulseData) {
-  const terrainData = buildPulseTerrainData(pulseData);
-  _currentData = terrainData;
-  renderTerrain(terrainData, 'pulse-three-container');
-  setTimeout(() => applyPreset('VASCULAR'), 200);
+function gaussianSmooth1D(arr, sigma) {
+  const radius = Math.ceil(sigma * 3);
+  const kernel = [];
+  let ksum = 0;
+  for (let i = -radius; i <= radius; i++) {
+    const w = Math.exp(-0.5 * (i / sigma) ** 2);
+    kernel.push(w);
+    ksum += w;
+  }
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= ksum;
+  const N = arr.length;
+  const result = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    let val = 0;
+    for (let k = 0; k < kernel.length; k++) {
+      const j = Math.max(0, Math.min(N - 1, i + k - radius));
+      val += kernel[k] * arr[j];
+    }
+    result[i] = val;
+  }
+  return result;
+}
+
+function buildTubeGeometry(cx, cy, radii, zScale, N, SEGS) {
+  const verts = new Float32Array(N * SEGS * 3);
+  const idxs = [];
+  for (let f = 0; f < N; f++) {
+    const z = f * zScale;
+    for (let s = 0; s < SEGS; s++) {
+      const angle = (s / SEGS) * Math.PI * 2;
+      const base = (f * SEGS + s) * 3;
+      verts[base]     = cx[f] + radii[f] * Math.cos(angle);
+      verts[base + 1] = cy[f] + radii[f] * Math.sin(angle);
+      verts[base + 2] = z;
+    }
+  }
+  for (let f = 0; f < N - 1; f++) {
+    for (let s = 0; s < SEGS; s++) {
+      const a = f * SEGS + s;
+      const b = f * SEGS + (s + 1) % SEGS;
+      const c = (f + 1) * SEGS + s;
+      const d = (f + 1) * SEGS + (s + 1) % SEGS;
+      idxs.push(a, b, d, a, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.setIndex(idxs);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function makeLabelSprite(text, hexColor) {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 48;
+  const ctx = cv.getContext('2d');
+  ctx.font = "bold 22px 'DM Mono', monospace";
+  ctx.fillStyle = hexColor;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 24);
+  const tex = new THREE.CanvasTexture(cv);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(70, 13, 1);
+  return sprite;
+}
+
+function renderPulseTubeViz(pulseData) {
+  const container = document.getElementById('pulse-three-container');
+  if (!container) return;
+  container.innerHTML = '';
+  if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
+  if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
+  if (_renderer)  { _renderer.dispose(); _renderer = null; }
+  if (_axisRenderer) { _axisRenderer.dispose(); _axisRenderer = null; }
+
+  const W = container.clientWidth  || 600;
+  const H = container.clientHeight || 500;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0d0d0d);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.localClippingEnabled = true;
+  container.appendChild(renderer.domElement);
+  renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+  _renderer = renderer;
+
+  const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+  _camera = camera;
+
+  // ── Parse vessel_components ────────────────────────────────────────────────
+  const N    = pulseData.frame_count;
+  const SEGS = 24;
+  const SIGMA = 6;
+  const IMG_W = 492, IMG_H = 318;
+  const cx0 = IMG_W / 2, cy0 = IMG_H / 2;
+
+  const jRawCx = new Float64Array(N);
+  const jRawCy = new Float64Array(N);
+  const jRawR  = new Float64Array(N);
+  const cRawCx = new Float64Array(N);
+  const cRawCy = new Float64Array(N);
+  const cRawR  = new Float64Array(N);
+  let carotidCount = 0;
+  let jCxSum = 0, jCySum = 0;
+
+  for (let f = 0; f < N; f++) {
+    const comps = pulseData.vessel_components[f] || [];
+    if (comps.length >= 1) {
+      jRawCx[f] = comps[0].centroid_x - cx0;
+      jRawCy[f] = -(comps[0].centroid_y - cy0);   // flip Y for 3D (row 0 = top)
+      jRawR[f]  = Math.sqrt(comps[0].pixel_count / Math.PI);
+      jCxSum += jRawCx[f]; jCySum += jRawCy[f];
+    }
+    if (comps.length >= 2) {
+      cRawCx[f] = comps[1].centroid_x - cx0;
+      cRawCy[f] = -(comps[1].centroid_y - cy0);
+      cRawR[f]  = Math.sqrt(comps[1].pixel_count / Math.PI);
+      carotidCount++;
+    }
+  }
+
+  // Fill missing carotid frames using last-known value (forward fill then backward fill)
+  const hasCarotid = carotidCount > N * 0.4;
+  if (hasCarotid) {
+    let lastCx = jRawCx[0], lastCy = jRawCy[0], lastR = jRawR[0] * 0.6;
+    for (let f = 0; f < N; f++) {
+      const comps = pulseData.vessel_components[f] || [];
+      if (comps.length >= 2) {
+        lastCx = cRawCx[f]; lastCy = cRawCy[f]; lastR = cRawR[f];
+      } else {
+        cRawCx[f] = lastCx; cRawCy[f] = lastCy; cRawR[f] = lastR;
+      }
+    }
+    // backward fill first frames if needed
+    let firstValid = -1;
+    for (let f = 0; f < N; f++) { if ((pulseData.vessel_components[f]||[]).length >= 2) { firstValid = f; break; } }
+    if (firstValid > 0) for (let f = 0; f < firstValid; f++) { cRawCx[f] = cRawCx[firstValid]; cRawCy[f] = cRawCy[firstValid]; cRawR[f] = cRawR[firstValid]; }
+  }
+
+  // ── Gaussian smoothing ────────────────────────────────────────────────────
+  const jCx = gaussianSmooth1D(jRawCx, SIGMA);
+  const jCy = gaussianSmooth1D(jRawCy, SIGMA);
+  const jR  = gaussianSmooth1D(jRawR,  SIGMA);
+  const cCx = hasCarotid ? gaussianSmooth1D(cRawCx, SIGMA) : null;
+  const cCy = hasCarotid ? gaussianSmooth1D(cRawCy, SIGMA) : null;
+  const cR  = hasCarotid ? gaussianSmooth1D(cRawR,  SIGMA) : null;
+
+  // Store smoothed jugular centroid for disc sync (back in original pixel coords for updatePulseFrame)
+  _pulseSmoothedJCx = new Float64Array(N);
+  _pulseSmoothedJCy = new Float64Array(N);
+  for (let f = 0; f < N; f++) {
+    _pulseSmoothedJCx[f] = jCx[f] + cx0;
+    _pulseSmoothedJCy[f] = -(jCy[f]) + cy0;   // undo the flip
+  }
+
+  // ── Z scale (total Z = avgDiameter × 8) ──────────────────────────────────
+  let avgR = 0;
+  for (let f = 0; f < N; f++) avgR += jR[f];
+  avgR /= N;
+  const avgDiameter = 2 * avgR;
+  const totalZ = avgDiameter * 8;
+  const zScale = totalZ / Math.max(N - 1, 1);
+  _pulseZScaleGlobal = zScale;
+
+  // ── Clip plane for grow animation ─────────────────────────────────────────
+  // Plane normal (0,0,-1) constant C: clips where -z + C < 0, i.e. z > C
+  // Starting at C=0: clips everything above z=0 (nothing visible)
+  // Ending at C=totalZ+1: everything visible
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+
+  // ── Jugular tube ──────────────────────────────────────────────────────────
+  const jugGeo = buildTubeGeometry(jCx, jCy, jR, zScale, N, SEGS);
+  const jugMat = new THREE.MeshStandardMaterial({
+    color: 0x00e5ff, opacity: 0.2, transparent: true,
+    side: THREE.DoubleSide, roughness: 0.4, metalness: 0.1,
+    clippingPlanes: [clipPlane],
+  });
+  const jugMesh = new THREE.Mesh(jugGeo, jugMat);
+  scene.add(jugMesh);
+  _pulseTubeMeshes = [jugMesh];
+
+  // ── Carotid tube ──────────────────────────────────────────────────────────
+  let carotidMesh = null;
+  if (hasCarotid) {
+    const carGeo = buildTubeGeometry(cCx, cCy, cR, zScale, N, SEGS);
+    const carMat = new THREE.MeshStandardMaterial({
+      color: 0xff6b35, opacity: 0.2, transparent: true,
+      side: THREE.DoubleSide, roughness: 0.4, metalness: 0.1,
+      clippingPlanes: [clipPlane],
+    });
+    carotidMesh = new THREE.Mesh(carGeo, carMat);
+    scene.add(carotidMesh);
+    _pulseTubeMeshes.push(carotidMesh);
+  }
+
+  // ── Scrubber disc ─────────────────────────────────────────────────────────
+  const discR = avgR * 1.6;
+  const discGeo = new THREE.CylinderGeometry(discR, discR, zScale * 0.15, 32);
+  const discMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.3, transparent: true });
+  const disc = new THREE.Mesh(discGeo, discMat);
+  disc.rotation.x = Math.PI / 2;   // CylinderGeometry is Y-up; rotate so axis is Z
+  disc.position.set(jCx[0], jCy[0], 0);
+  scene.add(disc);
+  _pulseDiscMesh = disc;
+
+  // ── Sprite labels ──────────────────────────────────────────────────────────
+  const zMid = totalZ / 2;
+  const jugLabel = makeLabelSprite('Jugular Vein', '#00e5ff');
+  jugLabel.position.set(jCx[Math.floor(N / 2)], jCy[Math.floor(N / 2)] + avgR + 18, zMid);
+  scene.add(jugLabel);
+
+  if (hasCarotid) {
+    const carLabel = makeLabelSprite('Carotid Artery', '#ff6b35');
+    const midF = Math.floor(N / 2);
+    carLabel.position.set(cCx[midF], cCy[midF] + cR[midF] + 18, zMid);
+    scene.add(carLabel);
+  }
+
+  // ── Lights ────────────────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  dirLight.position.set(IMG_W * 0.6, IMG_H * 0.5, totalZ * 0.8);
+  scene.add(dirLight);
+
+  // ── Axis indicator (bottom-left inset, 80×80) ──────────────────────────────
+  const axisWrap = document.createElement('div');
+  axisWrap.style.cssText = 'position:absolute;bottom:10px;left:10px;width:80px;height:80px;pointer-events:none;';
+  container.appendChild(axisWrap);
+  const axisRend = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  axisRend.setSize(80, 80);
+  axisRend.setPixelRatio(window.devicePixelRatio);
+  axisWrap.appendChild(axisRend.domElement);
+  _axisRenderer = axisRend;
+  const axisScene = new THREE.Scene();
+  _axisScene = axisScene;
+  const axisCam = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+  _axisCamera = axisCam;
+  axisScene.add(new THREE.AmbientLight(0xffffff, 3));
+  const orig3 = new THREE.Vector3(0, 0, 0);
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), orig3, 0.7, 0xff3333, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), orig3, 0.7, 0x33cc33, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), orig3, 0.7, 0x3366ff, 0.18, 0.09));
+
+  // ── Legend (top-right) ─────────────────────────────────────────────────────
+  const legend = document.createElement('div');
+  legend.style.cssText = 'position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:5px;pointer-events:none;';
+  const mkLegendRow = (color, labelText) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    const sw = document.createElement('div');
+    sw.style.cssText = `width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0;`;
+    const lbl = document.createElement('span');
+    lbl.style.cssText = "font-family:'DM Mono',monospace;font-size:9px;color:#b85535;white-space:nowrap;";
+    lbl.textContent = labelText;
+    row.appendChild(sw); row.appendChild(lbl);
+    return row;
+  };
+  legend.appendChild(mkLegendRow('#00e5ff', 'Jugular Vein — pulsatile'));
+  if (hasCarotid) legend.appendChild(mkLegendRow('#ff6b35', 'Carotid Artery — rigid'));
+  container.appendChild(legend);
+
+  // ── Info overlay (bottom-left above axis) ─────────────────────────────────
+  const info = document.createElement('div');
+  info.style.cssText = "position:absolute;bottom:100px;left:10px;font-family:'DM Mono',monospace;font-size:9px;color:rgba(184,85,53,0.7);line-height:1.6;pointer-events:none;";
+  info.innerHTML = `Z axis = time (${pulseData.duration_seconds.toFixed(2)}s)<br>Tube diameter = vessel size`;
+  container.appendChild(info);
+
+  // ── OrbitControls ─────────────────────────────────────────────────────────
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+
+  // ── Camera framing (45° angle from above and side) ────────────────────────
+  const box = new THREE.Box3().setFromObject(jugMesh);
+  const bCenter = new THREE.Vector3();
+  box.getCenter(bCenter);
+  const bSize = new THREE.Vector3();
+  box.getSize(bSize);
+  const maxDim = Math.max(bSize.x, bSize.y, bSize.z);
+  camera.near = 0.1;
+  camera.far = maxDim * 12;
+  camera.updateProjectionMatrix();
+  camera.position.set(
+    bCenter.x + maxDim * 0.55,
+    bCenter.y + maxDim * 0.45,
+    bCenter.z + maxDim * 0.85
+  );
+  camera.lookAt(bCenter);
+  controls.target.copy(bCenter);
+  controls.minDistance = maxDim * 0.05;
+  controls.maxDistance = maxDim * 8;
+  controls.update();
+
+  // ── Resize observer ───────────────────────────────────────────────────────
+  _resizeObs = new ResizeObserver(() => {
+    const nW = container.clientWidth, nH = container.clientHeight;
+    if (!nW || !nH) return;
+    camera.aspect = nW / nH;
+    camera.updateProjectionMatrix();
+    renderer.setSize(nW, nH);
+  });
+  _resizeObs.observe(container);
+
+  // ── Animation phases ──────────────────────────────────────────────────────
+  // Phase 1 (600ms): tubes grow along Z via clip plane
+  // Phase 2 (400ms): opacity 0.2 → 0.85
+  // Phase 3 (300ms): disc pulses white then settles
+  const t0 = performance.now();
+  const PHASE1 = 600, PHASE2 = 400, PHASE3 = 300;
+
+  function animate() {
+    _animId = requestAnimationFrame(animate);
+    const elapsed = performance.now() - t0;
+
+    if (elapsed < PHASE1) {
+      // Grow clip plane
+      const progress = elapsed / PHASE1;
+      clipPlane.constant = progress * (totalZ + avgR);
+    } else if (elapsed < PHASE1 + PHASE2) {
+      // Fully revealed; remove clip plane; fade opacity in
+      clipPlane.constant = totalZ + avgR + 1;
+      const progress = (elapsed - PHASE1) / PHASE2;
+      const op = 0.2 + progress * 0.65;
+      _pulseTubeMeshes.forEach(m => { m.material.opacity = op; });
+    } else if (elapsed < PHASE1 + PHASE2 + PHASE3) {
+      // Phase 3: disc pulse — scale up then down
+      _pulseTubeMeshes.forEach(m => { m.material.opacity = 0.85; });
+      const progress = (elapsed - PHASE1 - PHASE2) / PHASE3;
+      const pulse = 1 + 0.3 * Math.sin(progress * Math.PI);
+      disc.scale.set(pulse, 1, pulse);
+    } else {
+      // Steady state: remove clipping planes
+      if (_pulseTubeMeshes[0].material.clippingPlanes.length > 0) {
+        _pulseTubeMeshes.forEach(m => { m.material.clippingPlanes = []; });
+      }
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+    axisCam.position.set(0, 0, 0);
+    axisCam.quaternion.copy(camera.quaternion);
+    axisCam.translateZ(2);
+    axisRend.render(axisScene, axisCam);
+  }
+  animate();
 }
 
 function showPulse(pulseData) {
@@ -2745,6 +3174,7 @@ function showPulse(pulseData) {
   _pulseFrame   = 0;
   _pulseMmodeImageData = null;
   _pulseVideoImg = null;
+  // _pulseFrameImages / _pulseMaskImages / _pulseMaskCache pre-allocated by fetchPulseWithProgress
   stopPulsePlayback();
 
   showState('pulse');
@@ -2755,7 +3185,7 @@ function showPulse(pulseData) {
   buildMmodeImageData(pulseData);
   renderPulseMmode(pulseData, 0);
   renderPulseWaveform(pulseData, 0);
-  renderPulseVarianceTerrain(pulseData);
+  renderPulseTubeViz(pulseData);
   setupPulseControls(pulseData);
 
   document.getElementById('pulse-waveform-canvas').onclick = (e) => {
@@ -2833,6 +3263,13 @@ function setupPulseControls(pulseData) {
       const op = opSlider.value / 100;
       _terrainMesh.material.transparent = op < 1;
       _terrainMesh.material.opacity = op;
+    }
+    if (_pulseTubeMeshes.length > 0) {
+      const op = opSlider.value / 100;
+      _pulseTubeMeshes.forEach(m => {
+        m.material.transparent = true;
+        m.material.opacity = Math.max(0.05, op);
+      });
     }
   };
 
