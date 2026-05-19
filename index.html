@@ -2943,6 +2943,27 @@ function renderPulseTubeViz(pulseData) {
     }
   }
 
+  // Forward fill missing jugular frames (no component detected)
+  {
+    let lastCx = 0, lastCy = 0, lastR = 20, firstValid = -1;
+    for (let f = 0; f < N; f++) {
+      if ((pulseData.vessel_components[f] || []).length >= 1) { firstValid = f; break; }
+    }
+    if (firstValid > 0) {
+      for (let f = 0; f < firstValid; f++) {
+        jRawCx[f] = jRawCx[firstValid]; jRawCy[f] = jRawCy[firstValid]; jRawR[f] = jRawR[firstValid];
+      }
+    }
+    if (firstValid >= 0) { lastCx = jRawCx[firstValid]; lastCy = jRawCy[firstValid]; lastR = jRawR[firstValid]; }
+    for (let f = 0; f < N; f++) {
+      if ((pulseData.vessel_components[f] || []).length >= 1) {
+        lastCx = jRawCx[f]; lastCy = jRawCy[f]; lastR = jRawR[f];
+      } else {
+        jRawCx[f] = lastCx; jRawCy[f] = lastCy; jRawR[f] = lastR;
+      }
+    }
+  }
+
   // Fill missing carotid frames using last-known value (forward fill then backward fill)
   const hasCarotid = carotidCount > N * 0.4;
   if (hasCarotid) {

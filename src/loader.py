@@ -131,13 +131,8 @@ def load(filepath: str):
         return frames, {'format': fmt, 'anatomy': anatomy, 'dimensionality': '2D_sequence'}
 
     if fmt == 'dicom':
-        import pydicom
-        ds = pydicom.dcmread(path)
-        arr = ds.pixel_array  # (rows, cols) or (frames, rows, cols)
-        if arr.ndim == 2:
-            frames = [arr]
-        else:
-            frames = [arr[i] for i in range(arr.shape[0])]
+        streamer = fast.DICOMMultiFrameStreamer.create(path, loop=False, grayscale=True, cropToROI=False)
+        frames = [np.asarray(f) for f in fast.DataStream(streamer)]
         return frames, {'format': fmt, 'anatomy': anatomy, 'dimensionality': '2D_sequence'}
 
     raise ValueError(f'Unsupported format for: {path}')
