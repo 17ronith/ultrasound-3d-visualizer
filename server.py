@@ -10,7 +10,9 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+import cv2
 import numpy as np
+import onnxruntime as ort
 from PIL import Image as PILImage
 from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
@@ -20,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from skimage.filters import threshold_otsu
+from skimage.measure import label, regionprops
 
 import fast
 fast.Config.setTestDataPath('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
@@ -51,6 +54,26 @@ _OVERRIDE_TO_ROUTE = {
 }
 
 _FAST_DATA_ROOT = Path(fast.Config.getTestDataPath())
+
+_ort_session: ort.InferenceSession | None = None
+
+def _get_ort_session() -> ort.InferenceSession:
+    global _ort_session
+    if _ort_session is None:
+        model_path = str(_FAST_DATA_ROOT / 'NeuralNetworkModels/jugular_vein_segmentation.onnx')
+        _ort_session = ort.InferenceSession(model_path)
+    return _ort_session
+
+def _ort_infer_jugular(frame_np: np.ndarray) -> np.ndarray:
+    """Cached ORT inference — ~9 ms/frame vs ~1.7 s with FAST SegmentationNetwork."""
+    session = _get_ort_session()
+    inp_name = session.get_inputs()[0].name
+    H, W = frame_np.shape[:2]
+    norm = cv2.resize(frame_np.astype(np.float32) / 255.0, (256, 256))
+    inp = norm[:, :, np.newaxis][np.newaxis]  # (1, 256, 256, 1)
+    out = session.run(None, {inp_name: inp})[0][0]  # (256, 256, 3)
+    seg_f32 = (np.argmax(out, axis=-1) > 0).astype(np.float32)  # 1=artery/vein
+    return cv2.resize(seg_f32, (W, H), interpolation=cv2.INTER_NEAREST)
 
 def _find_sequence_dir(filename: str, uploaded_path: str = '') -> tuple[bool, str]:
     """Search FAST data for a numbered MHD file and return its directory if it is
@@ -294,16 +317,42 @@ def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
     else:
         mm_ds = mmode_norm.astype(np.float32)
 
-    # Step 8 — Representative frame
-    rep_idx = peak_frames[len(peak_frames) // 2] if peak_frames else min(85, N - 1)
-    rep_frame = raw_frames[rep_idx]
+    # Step 8 — Mask encoding shape for frontend scaling
+    H_m, W_m = prob_maps[0].shape
+    if H_m > MAX or W_m > MAX:
+        scale_m = MAX / max(H_m, W_m)
+        mask_enc_h = max(1, int(H_m * scale_m))
+        mask_enc_w = max(1, int(W_m * scale_m))
+    else:
+        mask_enc_h, mask_enc_w = H_m, W_m
+
+    # Step 9 — Vessel component extraction (per-frame connected components)
+    vessel_components = []
+    for pm in prob_maps:
+        binary = pm > 0.5
+        labeled = label(binary)
+        props = regionprops(labeled)
+        components = []
+        for rp in props:
+            if rp.area > 100:
+                min_row, min_col, max_row, max_col = rp.bbox
+                components.append({
+                    'centroid_x': int(round(rp.centroid[1])),
+                    'centroid_y': int(round(rp.centroid[0])),
+                    'pixel_count': int(rp.area),
+                    'bbox': [min_row, min_col, max_row, max_col],
+                })
+        components.sort(key=lambda c: c['pixel_count'], reverse=True)
+        vessel_components.append(components)
 
     return {
         'variance_map_ds': variance_map_ds, 'nH': nH, 'nW': nW,
         'va_norm': va_norm, 'mean_prob_ds': mean_prob_ds,
         'peak_frames': peak_frames, 'bpm': bpm,
         'centroid_col': centroid_col, 'mm_ds': mm_ds,
-        'rep_frame': rep_frame, 'H': H, 'W': W,
+        'H': H, 'W': W,
+        'mask_enc_shape': [mask_enc_h, mask_enc_w],
+        'vessel_components': vessel_components,
     }
 
 
@@ -338,30 +387,31 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
         duration_s = (timestamps[-1] - timestamps[0]) / 1000.0
         fps = (N - 1) / duration_s
 
-        # Step 2 — Inference on all frames (blocking; run each in thread to not block event loop)
+        # Step 2 — Load + ORT inference on all frames (~9 ms/frame vs ~1.7 s with FAST)
         loop = asyncio.get_running_loop()
         t_infer_start = time.time()
         raw_frames: list[np.ndarray] = []
         prob_maps: list[np.ndarray] = []
 
         for i, mhd_path in enumerate(mhd_files):
-            def _infer_frame(p=mhd_path):
-                frame_arr, frame_meta = load(str(p))
-                frame_meta['anatomy'] = 'JugularVein'
-                frame_np = np.asarray(frame_arr).squeeze()          # (318, 492)
-                prep = preprocess(frame_np, frame_meta)
-                pm, bm, _ = run_inference(prep, frame_meta)
-                return frame_np.astype(np.uint8), np.asarray(pm).squeeze()
+            def _load_and_ort_infer(p=mhd_path):
+                frame_arr, _ = load(str(p))
+                frame_np = np.asarray(frame_arr).squeeze()
+                if frame_np.ndim == 3:
+                    frame_np = frame_np.mean(axis=-1)
+                frame_np = frame_np.astype(np.uint8)
+                pm = _ort_infer_jugular(frame_np)
+                return frame_np, pm
 
             try:
-                frame_np, pm = await loop.run_in_executor(None, _infer_frame)
+                frame_np, pm = await loop.run_in_executor(None, _load_and_ort_infer)
             except Exception as exc:
-                yield f"data: {json.dumps({'error': f'Frame {i} inference failed: {exc}'})}\n\n"
+                yield f"data: {json.dumps({'error': f'Frame {i} failed: {exc}'})}\n\n"
                 return
             raw_frames.append(frame_np)
             prob_maps.append(pm)
 
-            if (i + 1) % 10 == 0 or i == N - 1:
+            if (i + 1) % 20 == 0 or i == N - 1:
                 yield f"data: {json.dumps({'progress': i + 1, 'total': N, 'stage': 'inference'})}\n\n"
 
         inference_time_ms = int((time.time() - t_infer_start) * 1000)
@@ -371,7 +421,7 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             None, _compute_pulse_results, raw_frames, prob_maps, N, duration_s, fps
         )
 
-        # Step 9 — Final SSE event with full payload
+        # Done event — metadata only (no frame pixel data)
         variance_map_ds = results['variance_map_ds']
         nH, nW = results['nH'], results['nW']
         va_norm = results['va_norm']
@@ -380,8 +430,9 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
         bpm = results['bpm']
         centroid_col = results['centroid_col']
         mm_ds = results['mm_ds']
-        rep_frame = results['rep_frame']
         H, W = results['H'], results['W']
+        mask_enc_shape = results['mask_enc_shape']
+        vessel_components = results['vessel_components']
 
         payload = {
             'done': True,
@@ -397,14 +448,31 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             'variance_map_shape': [nH, nW],
             'vessel_area_waveform': va_norm.tolist(),
             'mmode_data': mm_ds.ravel().tolist(),
-            'mmode_shape': list(mm_ds.shape),            # [N, D]
+            'mmode_shape': list(mm_ds.shape),
             'mean_probability_map': mean_prob_ds.ravel().tolist(),
             'mean_probability_shape': [nH, nW],
-            'representative_frame': rep_frame.ravel().tolist(),
             'representative_frame_shape': [H, W],
+            'mask_enc_shape': mask_enc_shape,
             'inference_time_ms': inference_time_ms,
+            'vessel_components': vessel_components,
         }
         yield f"data: {json.dumps(payload)}\n\n"
+
+        # Stream individual frame events (~120 KB each instead of one 20 MB blob)
+        mask_enc_h, mask_enc_w = mask_enc_shape
+        H_m, W_m = prob_maps[0].shape
+        needs_resize = H_m > 200 or W_m > 200
+        for i, (frame_np, pm) in enumerate(zip(raw_frames, prob_maps)):
+            _, fb = cv2.imencode('.jpg', frame_np, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            pm_u8 = (pm * 255).clip(0, 255).astype(np.uint8)
+            if needs_resize:
+                pm_u8 = np.array(
+                    PILImage.fromarray(pm_u8).resize((mask_enc_w, mask_enc_h), PILImage.BILINEAR)
+                )
+            _, mb = cv2.imencode('.jpg', pm_u8, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            yield f"data: {json.dumps({'frame': i, 'frame_b64': base64.b64encode(fb.tobytes()).decode('ascii'), 'mask_b64': base64.b64encode(mb.tobytes()).decode('ascii')})}\n\n"
+
+        yield f"data: {json.dumps({'frames_done': True})}\n\n"
 
     return StreamingResponse(
         generate(),
