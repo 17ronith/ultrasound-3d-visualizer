@@ -24,6 +24,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops
 
+import pydicom
+
 import fast
 fast.Config.setTestDataPath('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
 
@@ -56,6 +58,7 @@ _OVERRIDE_TO_ROUTE = {
 _FAST_DATA_ROOT = Path(fast.Config.getTestDataPath())
 
 _ort_session: ort.InferenceSession | None = None
+_nodule_ort_session: ort.InferenceSession | None = None
 
 def _get_ort_session() -> ort.InferenceSession:
     global _ort_session
@@ -63,6 +66,13 @@ def _get_ort_session() -> ort.InferenceSession:
         model_path = str(_FAST_DATA_ROOT / 'NeuralNetworkModels/jugular_vein_segmentation.onnx')
         _ort_session = ort.InferenceSession(model_path)
     return _ort_session
+
+def _get_nodule_ort_session() -> ort.InferenceSession:
+    global _nodule_ort_session
+    if _nodule_ort_session is None:
+        model_path = str(_FAST_DATA_ROOT / 'NeuralNetworkModels/lung_nodule_segmentation.onnx')
+        _nodule_ort_session = ort.InferenceSession(model_path)
+    return _nodule_ort_session
 
 def _ort_infer_jugular(frame_np: np.ndarray) -> np.ndarray:
     """Cached ORT inference — ~9 ms/frame vs ~1.7 s with FAST SegmentationNetwork."""
@@ -110,6 +120,18 @@ def _find_sequence_dir(filename: str, uploaded_path: str = '') -> tuple[bool, st
         return True, str(d)
     return False, ''
 
+def _find_ct_volume_dir(uploaded_path: str) -> tuple[bool, str]:
+    """True if uploaded file is .dcm AND >=100 other .dcm files exist in same FAST data dir."""
+    if not uploaded_path.lower().endswith('.dcm'):
+        return False, ''
+    fname = os.path.basename(uploaded_path)
+    for candidate in _FAST_DATA_ROOT.rglob(fname):
+        d = candidate.parent
+        sibling_dcm = list(d.glob('*.dcm'))
+        if len(sibling_dcm) >= 100:
+            return True, str(d)
+    return False, ''
+
 @app.post('/analyze')
 async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optional[str] = Form(None)):
     # Save all uploaded files to the same temp directory so that .mhd can
@@ -139,6 +161,7 @@ async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optiona
         _uploaded_mhd = mhd_path or first_path or ''
         _uploaded_fname = os.path.basename(_uploaded_mhd)
         _has_seq, _seq_dir = _find_sequence_dir(_uploaded_fname, _uploaded_mhd)
+        _has_ct, _ct_dir = _find_ct_volume_dir(mhd_path or first_path or '')
 
         # Companion extensions that pair with .mhd — not independent frames
         _companion = {'.mhd', '.raw', '.zraw'}
@@ -260,6 +283,8 @@ async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optiona
             'frame_count': len(seq_result['ordered_paths']) if seq_result and seq_result['is_sequential'] else 1,
             'has_sequence': _has_seq,
             'sequence_dir': _seq_dir,
+            'has_ct_volume': _has_ct,
+            'ct_volume_dir': _ct_dir,
         }
 
     except Exception as e:
@@ -473,6 +498,159 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             yield f"data: {json.dumps({'frame': i, 'frame_b64': base64.b64encode(fb.tobytes()).decode('ascii'), 'mask_b64': base64.b64encode(mb.tobytes()).decode('ascii')})}\n\n"
 
         yield f"data: {json.dumps({'frames_done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+@app.post('/analyze/nodule')
+async def analyze_nodule(ct_volume_dir: str = Form(...)):
+    """Stream SSE progress events during DICOM sliding-window nodule inference."""
+
+    async def generate():
+        volume_dir = Path(ct_volume_dir)
+        if not volume_dir.is_dir():
+            yield f"data: {json.dumps({'error': 'Directory not found'})}\n\n"
+            return
+
+        # Step 1 — Load + sort DICOMs
+        yield f"data: {json.dumps({'stage': 'loading', 'message': 'Loading DICOM slices...'})}\n\n"
+
+        loop = asyncio.get_running_loop()
+
+        def _load_dicoms():
+            dcm_files = sorted(volume_dir.glob('*.dcm'))
+            slices_meta = []
+            for p in dcm_files:
+                ds = pydicom.dcmread(str(p))
+                z = float(ds.ImagePositionPatient[2])
+                slices_meta.append((z, p, ds))
+            slices_meta.sort(key=lambda x: x[0])
+            n = len(slices_meta)
+
+            arrays = []
+            for z, p, ds in slices_meta:
+                arr = ds.pixel_array.astype(np.float32)
+                intercept = float(getattr(ds, 'RescaleIntercept', 0))
+                slope = float(getattr(ds, 'RescaleSlope', 1))
+                arrays.append(arr * slope + intercept)
+            vol_hu = np.stack(arrays, axis=0)  # (N, 512, 512)
+
+            window_w, level = 1500, -600
+            lo = level - window_w / 2
+            vol_norm = np.clip((vol_hu - lo) / window_w, 0.0, 1.0).astype(np.float32)
+            del vol_hu  # free ~305 MB
+            return vol_norm, n
+
+        try:
+            volume_norm, N = await loop.run_in_executor(None, _load_dicoms)
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': f'DICOM load failed: {exc}'})}\n\n"
+            return
+
+        yield f"data: {json.dumps({'stage': 'inference', 'message': f'Loaded {N} slices, starting inference...'})}\n\n"
+
+        # Step 2 — Sliding window ORT inference
+        WIN, STRIDE = 32, 16
+        starts = list(range(0, N - WIN + 1, STRIDE))
+
+        prob_sum   = np.zeros((N, 256, 256), dtype=np.float32)
+        prob_count = np.zeros((N, 256, 256), dtype=np.float32)
+        t_infer_start = time.time()
+
+        session = _get_nodule_ort_session()
+
+        for idx, i in enumerate(starts):
+            def _run_window(i=i):
+                window_slices = volume_norm[i:i+WIN]  # (32, 512, 512)
+                resized = np.stack([cv2.resize(s, (256, 256)) for s in window_slices], axis=0)
+                inp = resized[np.newaxis, :, :, :, np.newaxis].astype(np.float32)  # (1,32,256,256,1)
+                out = session.run(None, {'input_1:0': inp})[0]  # (1,32,256,256,2)
+                nodule_prob = out[0, :, :, :, 1]  # (32,256,256)
+                return i, nodule_prob
+
+            try:
+                start_i, nodule_prob = await loop.run_in_executor(None, _run_window)
+            except Exception as exc:
+                yield f"data: {json.dumps({'error': f'Inference window {idx} failed: {exc}'})}\n\n"
+                return
+
+            prob_sum[start_i:start_i+WIN]   += nodule_prob
+            prob_count[start_i:start_i+WIN] += 1.0
+
+            if (idx + 1) % 5 == 0 or idx == len(starts) - 1:
+                yield f"data: {json.dumps({'progress': idx + 1, 'total': len(starts), 'stage': 'inference'})}\n\n"
+
+        prob_volume = np.where(prob_count > 0, prob_sum / np.maximum(prob_count, 1), 0.0)
+        inference_time_ms = int((time.time() - t_infer_start) * 1000)
+
+        # Step 3 — Extract nodule components
+        binary = (prob_volume > 0.5).astype(np.uint8)
+        labeled = label(binary)
+        props = regionprops(labeled)
+        components = []
+        for rp in props:
+            if rp.area > 50:
+                components.append({
+                    'centroid_z': int(round(rp.centroid[0])),
+                    'centroid_y': int(round(rp.centroid[1])),
+                    'centroid_x': int(round(rp.centroid[2])),
+                    'voxel_count': int(rp.area),
+                    'mean_probability': float(np.mean(prob_volume[labeled == rp.label])),
+                    'bbox': list(rp.bbox),  # [z0, y0, x0, z1, y1, x1]
+                })
+        components.sort(key=lambda c: c['mean_probability'], reverse=True)
+
+        # Step 4 — Representative slice + gallery (5 slices through nodule bbox)
+        rep_z = components[0]['centroid_z'] if components else N // 2
+
+        if components:
+            bbox = components[0]['bbox']
+            z0, z1 = bbox[0], bbox[3]
+            gallery_zs = [int(z0 + (z1 - z0) * t / 4) for t in range(5)]
+        else:
+            cz = N // 2
+            gallery_zs = [max(0, cz - 16 + i * 8) for i in range(5)]
+
+        # Encode gallery CT slices (from volume_norm, 256x256, JPEG)
+        nodule_slices_b64 = []
+        for gz in gallery_zs:
+            gz = max(0, min(N - 1, gz))
+            sl = cv2.resize(volume_norm[gz], (256, 256))
+            sl_u8 = (sl * 255).astype(np.uint8)
+            _, buf = cv2.imencode('.jpg', sl_u8, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            nodule_slices_b64.append(base64.b64encode(buf.tobytes()).decode())
+
+        del volume_norm  # free memory after gallery encoding
+
+        # Step 5 — Downsample probability volume + build final SSE payload
+        step_z = max(1, N // 64)  # e.g. 305//64 = 4
+        step_y = 4                 # 256//64 = 4
+        step_x = 4
+        prob_ds = prob_volume[::step_z, ::step_y, ::step_x][:64, :64, :64]
+
+        rep_b64 = nodule_slices_b64[2]  # middle of 5 gallery slices
+
+        payload = {
+            'done': True,
+            'mode': 'nodule',
+            'anatomy': 'LIDC',
+            'slice_count': N,
+            'z_spacing_mm': 1.25,
+            'xy_spacing_mm': 0.732422,
+            'nodule_components': components,
+            'probability_volume': prob_ds.ravel().tolist(),
+            'volume_shape': list(prob_ds.shape),
+            'representative_slice_b64': rep_b64,
+            'nodule_slices_b64': nodule_slices_b64,
+            'gallery_z_indices': gallery_zs,
+            'has_ct_volume': True,
+            'inference_time_ms': inference_time_ms,
+        }
+        yield f"data: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(
         generate(),
