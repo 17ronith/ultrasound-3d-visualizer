@@ -745,6 +745,14 @@
       overflow: hidden;
     }
 
+    #state-nodule {
+      height: 100vh;
+      display: none;
+      flex-direction: column;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
     /* waveform bar */
     .pulse-waveform-bar {
       flex-shrink: 0;
@@ -1215,7 +1223,7 @@
 </div>
 
 <!-- ── State 6: CT Nodule 3D ─────────────────────────────────────────────── -->
-<div id="state-nodule" style="display:none;flex-direction:column;height:100%;gap:0;">
+<div id="state-nodule" style="gap:0;">
 
   <!-- Top bar -->
   <header class="dash-header">
