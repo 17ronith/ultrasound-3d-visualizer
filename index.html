@@ -3592,7 +3592,7 @@ function renderNoduleGallery(data) {
                          comp.bbox[5] - comp.bbox[2], comp.bbox[4] - comp.bbox[1]);
         }
       }
-      const z_mm = (-380 + gz * 1.25).toFixed(1);
+      const z_mm = (-380 + gz * data.z_spacing_mm).toFixed(1);
       ctx.fillStyle = 'rgba(0,229,255,0.85)';
       ctx.font = "10px 'DM Mono', monospace";
       ctx.fillText(`Z = ${z_mm}mm`, 4, 14);
@@ -3801,7 +3801,7 @@ function setupNoduleControls(data) {
     if (_noduleSlicePlane) {
       const zFactor = data.slice_count / 64;
       const voxD = data.z_spacing_mm * (data.slice_count / 64);
-      _noduleSlicePlane.position.z = (gz / (data.slice_count - 1)) * (64 * voxD);
+      _noduleSlicePlane.position.z = (gz / zFactor) * voxD;
     }
   });
 
