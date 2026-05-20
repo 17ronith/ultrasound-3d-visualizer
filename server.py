@@ -391,6 +391,11 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             yield f"data: {json.dumps({'error': 'Directory not found'})}\n\n"
             return
 
+        resolved = data_dir.resolve()
+        if not resolved.is_relative_to(_FAST_DATA_ROOT.resolve()):
+            yield f"data: {json.dumps({'error': 'Invalid directory'})}\n\n"
+            return
+
         # Step 1 — Load frame list + timestamps
         mhd_files = sorted(
             [p for p in data_dir.glob('*.mhd') if re.search(r'_(\d+)$', p.stem)],
@@ -516,6 +521,11 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
             yield f"data: {json.dumps({'error': 'Directory not found'})}\n\n"
             return
 
+        resolved = volume_dir.resolve()
+        if not resolved.is_relative_to(_FAST_DATA_ROOT.resolve()):
+            yield f"data: {json.dumps({'error': 'Invalid directory'})}\n\n"
+            return
+
         # Step 1 — Load + sort DICOMs
         yield f"data: {json.dumps({'stage': 'loading', 'message': 'Loading DICOM slices...'})}\n\n"
 
@@ -553,6 +563,10 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
 
         yield f"data: {json.dumps({'stage': 'inference', 'message': f'Loaded {N} slices, starting inference...'})}\n\n"
 
+        if N < 32:
+            yield f"data: {json.dumps({'error': f'Volume has only {N} slices, need >= 32'})}\n\n"
+            return
+
         # Step 2 — Sliding window ORT inference
         WIN, STRIDE = 32, 16
         starts = list(range(0, N - WIN + 1, STRIDE))
@@ -585,6 +599,7 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
                 yield f"data: {json.dumps({'progress': idx + 1, 'total': len(starts), 'stage': 'inference'})}\n\n"
 
         prob_volume = np.where(prob_count > 0, prob_sum / np.maximum(prob_count, 1), 0.0)
+        del prob_sum, prob_count
         inference_time_ms = int((time.time() - t_infer_start) * 1000)
 
         # Step 3 — Extract nodule components
