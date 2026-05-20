@@ -715,6 +715,24 @@
     }
     .mode-back-link:hover { color: var(--accent); }
 
+    /* Nodule gallery panel */
+    .panel-left--nodule {
+      width: 200px;
+      min-width: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      overflow-y: auto;
+    }
+
+    .nodule-gallery {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
     /* ═══════════════════════════════════════
        PULSE STATE
     ═══════════════════════════════════════ */
@@ -1016,6 +1034,21 @@
       <div class="mode-card-disabled-label" id="mode-pulse-disabled-label" style="display:none">No sequential frames detected</div>
     </div>
 
+    <!-- Card 3: CT Nodule 3D -->
+    <div class="mode-card" id="mode-card-nodule">
+      <svg class="mode-card-icon" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 14 L22 7 L36 14 L36 30 L22 37 L8 30 Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        <line x1="8" y1="14" x2="22" y2="21" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+        <line x1="36" y1="14" x2="22" y2="21" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+        <line x1="22" y1="21" x2="22" y2="37" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+        <circle cx="22" cy="21" r="3" fill="currentColor" opacity="0.8"/>
+      </svg>
+      <div class="mode-card-title">CT Nodule 3D</div>
+      <div class="mode-card-desc">Reconstruct a full 3D lung CT volume, detect nodules using AI, and visualize detected nodules as an interactive 3D isosurface.</div>
+      <button class="mode-card-btn" id="mode-btn-nodule">Analyze Volume</button>
+      <div class="mode-card-disabled-label" id="mode-nodule-disabled-label" style="display:none">CT Nodule 3D requires a multi-slice DICOM CT volume</div>
+    </div>
+
   </div>
 </div>
 
@@ -1177,6 +1210,76 @@
         <span class="ctrl-val" id="pulse-opacity-val">100%</span>
       </div>
     </div>
+  </div>
+
+</div>
+
+<!-- ── State 6: CT Nodule 3D ─────────────────────────────────────────────── -->
+<div id="state-nodule" style="display:none;flex-direction:column;height:100%;gap:0;">
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <a href="#" class="back-link" id="nodule-back-link">← Back</a>
+    <div class="brand">UltrasoundViz</div>
+    <div class="badge-row">
+      <span class="badge badge--anatomy" id="nodule-anatomy-badge">Lung CT</span>
+      <span class="badge badge--mode">CT Nodule 3D</span>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row" id="nodule-stats-row">
+    <!-- filled by renderNoduleStats() -->
+  </div>
+
+  <!-- Main panels -->
+  <div class="main-panels">
+
+    <!-- Left: gallery -->
+    <div class="panel-left panel-left--nodule">
+      <div class="panel-section-label">CT Slices</div>
+      <div class="nodule-gallery" id="nodule-gallery">
+        <!-- filled by renderNoduleGallery() -->
+      </div>
+    </div>
+
+    <!-- Right: Three.js -->
+    <div class="panel-right">
+      <div id="nodule-three-container" style="width:100%;height:100%;"></div>
+    </div>
+
+  </div>
+
+  <!-- Control bar -->
+  <div class="ctrl-bar">
+
+    <!-- Slice navigator -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Slice</label>
+      <input type="range" id="nodule-slice-slider" min="0" max="304" value="152" class="ctrl-slider">
+      <span class="ctrl-value" id="nodule-slice-label">Slice 152</span>
+    </div>
+
+    <!-- Opacity -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Cloud</label>
+      <input type="range" id="nodule-opacity" min="0" max="100" value="8" class="ctrl-slider">
+      <span class="ctrl-value" id="nodule-opacity-val">8%</span>
+    </div>
+
+    <!-- Isolate toggle -->
+    <div class="ctrl-group">
+      <button class="ctrl-btn" id="nodule-isolate-btn">Isolate Nodule</button>
+    </div>
+
+    <!-- Transfer function presets -->
+    <div class="ctrl-group">
+      <label class="ctrl-label">Preset</label>
+      <button class="ctrl-btn active" data-nodule-preset="standard">Standard</button>
+      <button class="ctrl-btn" data-nodule-preset="highlight">Highlight</button>
+      <button class="ctrl-btn" data-nodule-preset="xray">X-Ray</button>
+    </div>
+
   </div>
 
 </div>
@@ -3109,6 +3212,25 @@ function renderPulseTubeViz(pulseData) {
   info.style.cssText = "position:absolute;bottom:100px;left:10px;font-family:'DM Mono',monospace;font-size:9px;color:rgba(184,85,53,0.7);line-height:1.6;pointer-events:none;";
   info.innerHTML = `Z axis = time (${pulseData.duration_seconds.toFixed(2)}s)<br>Tube diameter = vessel size`;
   container.appendChild(info);
+
+  // ── Ground plane ──────────────────────────────────────────────────────────
+  {
+    const allBox = new THREE.Box3().setFromObject(jugMesh);
+    if (carotidMesh) allBox.expandByObject(carotidMesh);
+    const bMin = allBox.min;
+    const bMax = allBox.max;
+    const padX = (bMax.x - bMin.x) * 0.2;
+    const padZ = (bMax.z - bMin.z) * 0.2;
+    const planeW = (bMax.x - bMin.x) + 2 * padX;
+    const planeD = (bMax.z - bMin.z) + 2 * padZ;
+    const planeMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(planeW, planeD),
+      new THREE.MeshBasicMaterial({ color: 0x111111, opacity: 0.5, transparent: true, side: THREE.DoubleSide })
+    );
+    planeMesh.rotation.x = -Math.PI / 2;
+    planeMesh.position.set((bMin.x + bMax.x) / 2, bMin.y, (bMin.z + bMax.z) / 2);
+    scene.add(planeMesh);
+  }
 
   // ── OrbitControls ─────────────────────────────────────────────────────────
   const controls = new OrbitControls(camera, renderer.domElement);
