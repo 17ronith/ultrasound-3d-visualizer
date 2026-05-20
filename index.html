@@ -3517,16 +3517,13 @@ async function fetchNoduleWithProgress(ctVolumeDir) {
         break;
       }
       if (json.error) throw new Error(json.error);
-      if (json.status === 'loading') {
+      if (json.stage === 'loading') {
         setStatus('Loading 305 CT slices…');
         setLoadingProgress(5);
-      } else if (json.status === 'detecting') {
-        const pct = json.window !== undefined ? Math.round(5 + (json.window / 18) * 80) : 50;
-        setStatus(`Running 3D nodule detection… (window ${json.window}/18)`);
+      } else if (json.progress !== undefined) {
+        const pct = Math.round(5 + (json.progress / json.total) * 85);
+        setStatus(`Running 3D nodule detection… (window ${json.progress}/${json.total})`);
         setLoadingProgress(pct);
-      } else if (json.status === 'building') {
-        setStatus('Building nodule model…');
-        setLoadingProgress(92);
       }
     }
     if (noduleData) break;
@@ -3559,7 +3556,7 @@ function renderNoduleStats(data) {
   const n = data.nodule_components.length;
   const biggest = n > 0 ? data.nodule_components.reduce((a, b) => a.voxel_count > b.voxel_count ? a : b) : null;
   const volMm3 = biggest
-    ? (biggest.voxel_count * 4 * 4 * (data.slice_count / 64) * data.xy_spacing_mm ** 2 * data.z_spacing_mm).toFixed(0)
+    ? (biggest.voxel_count * 4 * data.xy_spacing_mm ** 2 * data.z_spacing_mm).toFixed(0)
     : '—';
   const peakConf = n > 0 ? (data.nodule_components[0].mean_probability * 100).toFixed(1) + '%' : '—';
   const el = document.getElementById('nodule-stats-row');
