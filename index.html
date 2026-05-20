@@ -1370,6 +1370,13 @@ let _pulseZScaleGlobal = 1;       // frame index → Z world-units multiplier
 let _terrainContainerId = 'three-container';
 let _modeSelectData = null;
 
+// CT Nodule 3D state
+let _noduleData       = null;
+let _noduleCloudMesh  = null;
+let _noduleMeshes     = [];
+let _noduleSlicePlane = null;
+let _noduleIsolated   = false;
+
 // Features 1–4 state
 let _camera = null;
 let _raycaster = null;
@@ -1416,6 +1423,11 @@ function teardownThree() {
   _pulseSmoothedJCx = null;
   _pulseSmoothedJCy = null;
   _pulseZScaleGlobal = 1;
+  _noduleData = null;
+  _noduleCloudMesh = null;
+  _noduleMeshes = [];
+  _noduleSlicePlane = null;
+  _noduleIsolated = false;
 }
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -1426,6 +1438,7 @@ function showState(s) {
   document.getElementById('state-mode-select').style.display = s === 'mode_select' ? 'flex' : 'none';
   document.getElementById('state-dashboard').style.display   = s === 'dashboard'   ? 'flex' : 'none';
   document.getElementById('state-pulse').style.display       = s === 'pulse'       ? 'flex' : 'none';
+  document.getElementById('state-nodule').style.display      = s === 'nodule'      ? 'flex' : 'none';
 }
 
 function setStatus(msg) { document.getElementById('loading-status').textContent = msg; }
@@ -1568,15 +1581,22 @@ function showModeSelect(data) {
   const pulseCard = document.getElementById('mode-card-pulse');
   const pulseBtn  = document.getElementById('mode-btn-pulse');
   const pulseDisabledLabel = document.getElementById('mode-pulse-disabled-label');
-  if (data.has_sequence) {
-    pulseCard.classList.remove('mode-card--disabled');
-    pulseBtn.disabled = false;
-    pulseDisabledLabel.style.display = 'none';
-  } else {
-    pulseCard.classList.add('mode-card--disabled');
-    pulseBtn.disabled = true;
-    pulseDisabledLabel.style.display = 'block';
-  }
+  // Pulse: only for vascular sequences
+  const vascularAnatomies = ['JugularVein', 'CarotidArtery', 'Jugular Vein', 'Carotid Artery',
+                              'FemoralArtery', 'Femoral Artery'];
+  const pulseOk = data.has_sequence && vascularAnatomies.includes(data.anatomy);
+  pulseCard.classList.toggle('mode-card--disabled', !pulseOk);
+  pulseBtn.disabled = !pulseOk;
+  pulseDisabledLabel.style.display = pulseOk ? 'none' : 'block';
+
+  // CT Nodule
+  const noduleCard = document.getElementById('mode-card-nodule');
+  const noduleBtn  = document.getElementById('mode-btn-nodule');
+  const noduleDL   = document.getElementById('mode-nodule-disabled-label');
+  const noduleOk   = !!data.has_ct_volume;
+  noduleCard.classList.toggle('mode-card--disabled', !noduleOk);
+  noduleBtn.disabled = !noduleOk;
+  noduleDL.style.display = noduleOk ? 'none' : 'block';
 }
 
 document.getElementById('mode-btn-single').addEventListener('click', () => {
@@ -1596,6 +1616,23 @@ document.getElementById('mode-btn-pulse').addEventListener('click', async () => 
     setStatus('Rendering…');
     await new Promise(r => setTimeout(r, 100));
     showPulse(pulseData);
+  } catch (err) {
+    document.getElementById('loading-progress-wrap').style.display = 'none';
+    showError(err.message);
+  }
+});
+
+document.getElementById('mode-btn-nodule').addEventListener('click', async () => {
+  if (!_modeSelectData || !_modeSelectData.ct_volume_dir) return;
+  showState('loading');
+  document.getElementById('loading-progress-wrap').style.display = 'block';
+  setLoadingProgress(0);
+  setStatus('Loading 305 CT slices…');
+  try {
+    const noduleData = await fetchNoduleWithProgress(_modeSelectData.ct_volume_dir);
+    setStatus('Rendering…');
+    await new Promise(r => setTimeout(r, 100));
+    showNodule(noduleData);
   } catch (err) {
     document.getElementById('loading-progress-wrap').style.display = 'none';
     showError(err.message);
@@ -3447,6 +3484,367 @@ function setupPulseControls(pulseData) {
   document.querySelectorAll('#state-pulse .preset-btn').forEach(btn => {
     btn.onclick = () => applyPreset(btn.dataset.preset);
   });
+}
+
+// ── CT Nodule 3D ──────────────────────────────────────────────────────────────
+
+async function fetchNoduleWithProgress(ctVolumeDir) {
+  const fd = new FormData();
+  fd.append('ct_volume_dir', ctVolumeDir);
+  const res = await fetch('http://localhost:8000/analyze/nodule', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error(`Server error ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let noduleData = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop();
+    for (const event of events) {
+      if (!event.startsWith('data: ')) continue;
+      const json = JSON.parse(event.slice(6).trim());
+      if (json.done) {
+        setLoadingProgress(100);
+        noduleData = json;
+        break;
+      }
+      if (json.error) throw new Error(json.error);
+      if (json.status === 'loading') {
+        setStatus('Loading 305 CT slices…');
+        setLoadingProgress(5);
+      } else if (json.status === 'detecting') {
+        const pct = json.window !== undefined ? Math.round(5 + (json.window / 18) * 80) : 50;
+        setStatus(`Running 3D nodule detection… (window ${json.window}/18)`);
+        setLoadingProgress(pct);
+      } else if (json.status === 'building') {
+        setStatus('Building nodule model…');
+        setLoadingProgress(92);
+      }
+    }
+    if (noduleData) break;
+  }
+  if (!noduleData) throw new Error('SSE stream ended without final event');
+  return noduleData;
+}
+
+function showNodule(data) {
+  _noduleData = data;
+  showState('nodule');
+  renderNoduleHeader(data);
+  renderNoduleStats(data);
+  renderNoduleGallery(data);
+  teardownThree();
+  _terrainContainerId = 'nodule-three-container';
+  renderNoduleViz(data);
+  setupNoduleControls(data);
+}
+
+function renderNoduleHeader(data) {
+  const badge = document.getElementById('nodule-anatomy-badge');
+  badge.textContent = 'Lung CT';
+  badge.style.background = '#e74c3c22';
+  badge.style.color = '#e74c3c';
+  badge.style.border = '1px solid #e74c3c66';
+}
+
+function renderNoduleStats(data) {
+  const n = data.nodule_components.length;
+  const biggest = n > 0 ? data.nodule_components.reduce((a, b) => a.voxel_count > b.voxel_count ? a : b) : null;
+  const volMm3 = biggest
+    ? (biggest.voxel_count * 4 * 4 * (data.slice_count / 64) * data.xy_spacing_mm ** 2 * data.z_spacing_mm).toFixed(0)
+    : '—';
+  const peakConf = n > 0 ? (data.nodule_components[0].mean_probability * 100).toFixed(1) + '%' : '—';
+  const el = document.getElementById('nodule-stats-row');
+  el.innerHTML = `
+    <div class="stat-card"><div class="stat-label">Anatomy</div><div class="stat-value">Lung CT</div><div class="stat-sub">LIDC-IDRI dataset</div></div>
+    <div class="stat-card"><div class="stat-label">Nodules Detected</div><div class="stat-value">${n}</div><div class="stat-sub">above 50 voxel threshold</div></div>
+    <div class="stat-card"><div class="stat-label">Largest Nodule</div><div class="stat-value">${volMm3} mm³</div><div class="stat-sub">estimated volume</div></div>
+    <div class="stat-card"><div class="stat-label">Peak Confidence</div><div class="stat-value">${peakConf}</div><div class="stat-sub">model certainty</div></div>
+  `;
+}
+
+function renderNoduleGallery(data) {
+  const panel = document.getElementById('nodule-gallery');
+  panel.innerHTML = '';
+  data.nodule_slices_b64.forEach((b64, i) => {
+    const gz = data.gallery_z_indices[i];
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;border:2px solid transparent;cursor:pointer;flex:1;';
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    canvas.style.cssText = 'width:100%;height:100%;display:block;';
+    wrap.appendChild(canvas);
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 256, 256);
+      if (data.nodule_components.length > 0) {
+        const comp = data.nodule_components[0];
+        if (gz >= comp.bbox[0] && gz <= comp.bbox[3]) {
+          ctx.strokeStyle = '#00e5ff';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(comp.bbox[2], comp.bbox[1],
+                         comp.bbox[5] - comp.bbox[2], comp.bbox[4] - comp.bbox[1]);
+        }
+      }
+      const z_mm = (-380 + gz * 1.25).toFixed(1);
+      ctx.fillStyle = 'rgba(0,229,255,0.85)';
+      ctx.font = "10px 'DM Mono', monospace";
+      ctx.fillText(`Z = ${z_mm}mm`, 4, 14);
+    };
+    img.src = 'data:image/jpeg;base64,' + b64;
+    wrap.addEventListener('click', () => {
+      document.querySelectorAll('#nodule-gallery > div').forEach(d => d.style.borderColor = 'transparent');
+      wrap.style.borderColor = 'var(--accent)';
+      if (_noduleSlicePlane) {
+        const zFactor = data.slice_count / 64;
+        const voxD = data.z_spacing_mm * data.slice_count / 64;
+        _noduleSlicePlane.position.z = (gz / zFactor) * voxD;
+      }
+      document.getElementById('nodule-slice-slider').value = gz;
+      updateNoduleSliceLabel(gz, data);
+    });
+    panel.appendChild(wrap);
+  });
+}
+
+function renderNoduleViz(data) {
+  const container = document.getElementById(_terrainContainerId);
+  if (!container) return;
+  container.innerHTML = '';
+  if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
+  if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
+  if (_renderer)  { _renderer.dispose(); _renderer = null; }
+  if (_axisRenderer) { _axisRenderer.dispose(); _axisRenderer = null; }
+
+  const W = container.clientWidth  || 600;
+  const H = container.clientHeight || 500;
+
+  const voxW = data.xy_spacing_mm * (256 / 64);
+  const voxH = data.xy_spacing_mm * (256 / 64);
+  const voxD = data.z_spacing_mm  * (data.slice_count / 64);
+  const zFactor = data.slice_count / 64;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0d0d0d);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+  renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+  _renderer = renderer;
+
+  const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+  _camera = camera;
+
+  // ── Lung context cloud (Points) ────────────────────────────────────────────
+  const vol = data.probability_volume;
+  const [dz, dy, dx] = data.volume_shape;
+  const positions = [];
+  for (let z = 0; z < dz; z++)
+    for (let y = 0; y < dy; y++)
+      for (let x = 0; x < dx; x++) {
+        if (vol[z * dy * dx + y * dx + x] > 0.1) {
+          positions.push(x * voxW, y * voxH, z * voxD);
+        }
+      }
+  const cloudGeo = new THREE.BufferGeometry();
+  cloudGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const cloudMat = new THREE.PointsMaterial({ color: 0x666666, size: 0.5, opacity: 0.08, transparent: true, depthWrite: false });
+  _noduleCloudMesh = new THREE.Points(cloudGeo, cloudMat);
+  scene.add(_noduleCloudMesh);
+
+  // ── Nodule isosurface (InstancedMesh per component) ────────────────────────
+  const sphereGeo = new THREE.SphereGeometry(0.4, 6, 6);
+  const dummy = new THREE.Object3D();
+  _noduleMeshes = [];
+
+  data.nodule_components.forEach((comp, ci) => {
+    const color = ci === 0 ? 0xffee88 : 0xff8833;
+    const bz0 = Math.floor(comp.bbox[0] / zFactor);
+    const by0 = Math.floor(comp.bbox[1] / 4);
+    const bx0 = Math.floor(comp.bbox[2] / 4);
+    const bz1 = Math.ceil(comp.bbox[3] / zFactor);
+    const by1 = Math.ceil(comp.bbox[4] / 4);
+    const bx1 = Math.ceil(comp.bbox[5] / 4);
+
+    const voxelPos = [];
+    for (let z = bz0; z <= Math.min(bz1, dz - 1); z++)
+      for (let y = by0; y <= Math.min(by1, dy - 1); y++)
+        for (let x = bx0; x <= Math.min(bx1, dx - 1); x++) {
+          if (vol[z * dy * dx + y * dx + x] > 0.5) {
+            voxelPos.push([x * voxW, y * voxH, z * voxD]);
+          }
+        }
+
+    if (voxelPos.length === 0) return;
+    const mat = new THREE.MeshStandardMaterial({ color, opacity: 0.95, transparent: false });
+    const mesh = new THREE.InstancedMesh(sphereGeo, mat, voxelPos.length);
+    voxelPos.forEach(([px, py, pz], i) => {
+      dummy.position.set(px, py, pz);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    _noduleMeshes.push(mesh);
+    scene.add(mesh);
+  });
+
+  // ── Lights ─────────────────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+  dir.position.set(30, 40, 20);
+  scene.add(dir);
+
+  // ── Slice plane (horizontal disc at representative Z) ──────────────────────
+  const rep_z_world = data.nodule_components.length > 0
+    ? (data.nodule_components[0].centroid_z / zFactor) * voxD
+    : (data.slice_count / 2 / zFactor) * voxD;
+  const planeGeo = new THREE.PlaneGeometry(64 * voxW, 64 * voxH);
+  const planeMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, opacity: 0.15, transparent: true, side: THREE.DoubleSide });
+  _noduleSlicePlane = new THREE.Mesh(planeGeo, planeMat);
+  _noduleSlicePlane.rotation.x = -Math.PI / 2;
+  _noduleSlicePlane.position.set(32 * voxW, 0, rep_z_world);
+  scene.add(_noduleSlicePlane);
+
+  // ── OrbitControls ──────────────────────────────────────────────────────────
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+
+  // ── Camera — aim at highest-confidence nodule centroid ────────────────────
+  if (data.nodule_components.length > 0) {
+    const c = data.nodule_components[0];
+    const cx = (c.centroid_x / 4) * voxW;
+    const cy = (c.centroid_y / 4) * voxH;
+    const cz = (c.centroid_z / zFactor) * voxD;
+    controls.target.set(cx, cy, cz);
+    camera.position.set(cx + 60, cy + 40, cz + 80);
+    controls.update();
+  } else {
+    const cx = 32 * voxW;
+    const cy = 32 * voxH;
+    const cz = rep_z_world;
+    controls.target.set(cx, cy, cz);
+    camera.position.set(cx + 60, cy + 40, cz + 80);
+    controls.update();
+  }
+
+  // ── Axis indicator (bottom-left inset, 80×80) ──────────────────────────────
+  const axisWrap = document.createElement('div');
+  axisWrap.style.cssText = 'position:absolute;bottom:10px;left:10px;width:80px;height:80px;pointer-events:none;';
+  container.appendChild(axisWrap);
+  const axisRend = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  axisRend.setSize(80, 80);
+  axisRend.setPixelRatio(window.devicePixelRatio);
+  axisWrap.appendChild(axisRend.domElement);
+  _axisRenderer = axisRend;
+  const axisScene = new THREE.Scene();
+  _axisScene = axisScene;
+  const axisCam = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+  _axisCamera = axisCam;
+  axisScene.add(new THREE.AmbientLight(0xffffff, 3));
+  const orig3 = new THREE.Vector3(0, 0, 0);
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), orig3, 0.7, 0xff3333, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), orig3, 0.7, 0x33cc33, 0.18, 0.09));
+  axisScene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), orig3, 0.7, 0x3366ff, 0.18, 0.09));
+
+  // ── Info overlay ───────────────────────────────────────────────────────────
+  const info = document.createElement('div');
+  info.style.cssText = "position:absolute;bottom:100px;left:10px;font-family:'DM Mono',monospace;font-size:9px;color:rgba(184,85,53,0.7);line-height:1.6;pointer-events:none;";
+  info.innerHTML = `Voxel size: ${voxW.toFixed(2)} × ${voxH.toFixed(2)} × ${voxD.toFixed(2)} mm<br>Volume: ${dz}×${dy}×${dx} downsampled`;
+  container.appendChild(info);
+
+  // ── Resize observer ────────────────────────────────────────────────────────
+  _resizeObs = new ResizeObserver(() => {
+    const nW = container.clientWidth, nH = container.clientHeight;
+    if (!nW || !nH) return;
+    camera.aspect = nW / nH;
+    camera.updateProjectionMatrix();
+    renderer.setSize(nW, nH);
+  });
+  _resizeObs.observe(container);
+
+  // ── Animation loop ─────────────────────────────────────────────────────────
+  function animate() {
+    _animId = requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+    axisCam.position.set(0, 0, 0);
+    axisCam.quaternion.copy(camera.quaternion);
+    axisCam.translateZ(2);
+    axisRend.render(axisScene, axisCam);
+  }
+  animate();
+}
+
+function updateNoduleSliceLabel(gz, data) {
+  const z_mm = (-380 + gz * data.z_spacing_mm).toFixed(1);
+  document.getElementById('nodule-slice-label').textContent =
+    `Slice ${gz} / ${data.slice_count} — Z = ${z_mm}mm`;
+}
+
+function setupNoduleControls(data) {
+  const slider = document.getElementById('nodule-slice-slider');
+  slider.max = data.slice_count - 1;
+  slider.value = data.gallery_z_indices[2];
+  updateNoduleSliceLabel(parseInt(slider.value), data);
+  slider.addEventListener('input', () => {
+    const gz = parseInt(slider.value);
+    updateNoduleSliceLabel(gz, data);
+    if (_noduleSlicePlane) {
+      const zFactor = data.slice_count / 64;
+      const voxD = data.z_spacing_mm * (data.slice_count / 64);
+      _noduleSlicePlane.position.z = (gz / (data.slice_count - 1)) * (64 * voxD);
+    }
+  });
+
+  const opSlider = document.getElementById('nodule-opacity');
+  opSlider.addEventListener('input', () => {
+    const op = parseInt(opSlider.value) / 100;
+    document.getElementById('nodule-opacity-val').textContent = opSlider.value + '%';
+    if (_noduleCloudMesh) _noduleCloudMesh.material.opacity = op;
+  });
+
+  document.getElementById('nodule-isolate-btn').addEventListener('click', function() {
+    _noduleIsolated = !_noduleIsolated;
+    this.classList.toggle('active', _noduleIsolated);
+    if (_noduleCloudMesh) _noduleCloudMesh.visible = !_noduleIsolated;
+  });
+
+  document.querySelectorAll('[data-nodule-preset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-nodule-preset]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      applyNodulePreset(btn.dataset.nodulePreset);
+    });
+  });
+
+  document.getElementById('nodule-back-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    teardownThree();
+    showState('mode_select');
+  });
+}
+
+function applyNodulePreset(preset) {
+  if (!_noduleMeshes.length) return;
+  if (preset === 'standard') {
+    _noduleMeshes.forEach((m, i) => { m.material.color.setHex(i === 0 ? 0xffee88 : 0xff8833); });
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.08; _noduleCloudMesh.material.color.setHex(0x666666); }
+  } else if (preset === 'highlight') {
+    _noduleMeshes.forEach(m => { m.material.color.setHex(0xff4444); });
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.15; }
+  } else if (preset === 'xray') {
+    _noduleMeshes.forEach(m => { m.material.color.setHex(0x88ffff); });
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.25; _noduleCloudMesh.material.color.setHex(0x88ffff); }
+  }
 }
 
 window.__handleFile = handleFile;
