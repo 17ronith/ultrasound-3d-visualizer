@@ -1218,14 +1218,20 @@
 <div id="state-nodule" style="display:none;flex-direction:column;height:100%;gap:0;">
 
   <!-- Top bar -->
-  <div class="top-bar">
-    <a href="#" class="back-link" id="nodule-back-link">← Back</a>
-    <div class="brand">UltrasoundViz</div>
-    <div class="badge-row">
-      <span class="badge badge--anatomy" id="nodule-anatomy-badge">Lung CT</span>
-      <span class="badge badge--mode">CT Nodule 3D</span>
+  <header class="dash-header">
+    <div style="display:flex;align-items:center;gap:18px;">
+      <a style="font-size:12px;font-weight:400;color:var(--muted);cursor:pointer;text-decoration:none;transition:color 0.15s;"
+         id="nodule-back-link"
+         onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">
+        ← Back
+      </a>
+      <div class="brand">Ultrasound<span class="brand-accent">Viz</span></div>
     </div>
-  </div>
+    <div class="header-badges" id="nodule-header-badges">
+      <span class="badge" id="nodule-anatomy-badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">Lung CT</span>
+      <span class="badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">CT Nodule 3D</span>
+    </div>
+  </header>
 
   <!-- Stats row -->
   <div class="stats-row" id="nodule-stats-row">
@@ -1237,7 +1243,7 @@
 
     <!-- Left: gallery -->
     <div class="panel-left panel-left--nodule">
-      <div class="panel-section-label">CT Slices</div>
+      <div class="panel-label">CT Slices</div>
       <div class="nodule-gallery" id="nodule-gallery">
         <!-- filled by renderNoduleGallery() -->
       </div>
@@ -1254,30 +1260,44 @@
   <div class="ctrl-bar">
 
     <!-- Slice navigator -->
-    <div class="ctrl-group">
-      <label class="ctrl-label">Slice</label>
-      <input type="range" id="nodule-slice-slider" min="0" max="304" value="152" class="ctrl-slider">
-      <span class="ctrl-value" id="nodule-slice-label">Slice 152</span>
+    <div class="ctrl-section">
+      <div class="ctrl-label">Slice</div>
+      <div class="ctrl-row">
+        <input type="range" id="nodule-slice-slider" min="0" max="304" value="152" class="ctrl-slider">
+        <span class="ctrl-val" id="nodule-slice-label">Slice 152</span>
+      </div>
     </div>
+
+    <div class="ctrl-divider"></div>
 
     <!-- Opacity -->
-    <div class="ctrl-group">
-      <label class="ctrl-label">Cloud</label>
-      <input type="range" id="nodule-opacity" min="0" max="100" value="8" class="ctrl-slider">
-      <span class="ctrl-value" id="nodule-opacity-val">8%</span>
+    <div class="ctrl-section">
+      <div class="ctrl-label">Cloud</div>
+      <div class="ctrl-row">
+        <input type="range" id="nodule-opacity" min="0" max="100" value="8" class="ctrl-slider">
+        <span class="ctrl-val" id="nodule-opacity-val">8%</span>
+      </div>
     </div>
+
+    <div class="ctrl-divider"></div>
 
     <!-- Isolate toggle -->
-    <div class="ctrl-group">
-      <button class="ctrl-btn" id="nodule-isolate-btn">Isolate Nodule</button>
+    <div class="ctrl-section">
+      <div class="ctrl-row">
+        <button class="preset-btn" id="nodule-isolate-btn">Isolate Nodule</button>
+      </div>
     </div>
 
+    <div class="ctrl-divider"></div>
+
     <!-- Transfer function presets -->
-    <div class="ctrl-group">
-      <label class="ctrl-label">Preset</label>
-      <button class="ctrl-btn active" data-nodule-preset="standard">Standard</button>
-      <button class="ctrl-btn" data-nodule-preset="highlight">Highlight</button>
-      <button class="ctrl-btn" data-nodule-preset="xray">X-Ray</button>
+    <div class="ctrl-section">
+      <div class="ctrl-label">Preset</div>
+      <div class="ctrl-row">
+        <button class="preset-btn active" data-nodule-preset="standard">Standard</button>
+        <button class="preset-btn" data-nodule-preset="highlight">Highlight</button>
+        <button class="preset-btn" data-nodule-preset="xray">X-Ray</button>
+      </div>
     </div>
 
   </div>
