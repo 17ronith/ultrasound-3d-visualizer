@@ -8,7 +8,8 @@ DATA = fast.Config.getTestDataPath()
 
 _MODEL_ROUTES = {
     'JugularVein': DATA + 'NeuralNetworkModels/jugular_vein_segmentation.onnx',
-    'LIDC':        DATA + 'NeuralNetworkModels/lung_nodule_segmentation.onnx',
+    # LIDC uses a 3D sliding-window model handled by /analyze/nodule ORT session;
+    # 2D dashboard preview falls back to pixel intensity.
 }
 
 

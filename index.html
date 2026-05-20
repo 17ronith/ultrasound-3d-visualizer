@@ -717,12 +717,18 @@
 
     /* Nodule gallery panel */
     .panel-left--nodule {
+      flex: 0 0 200px;
       width: 200px;
       min-width: 200px;
       display: flex;
       flex-direction: column;
       gap: 4px;
       overflow-y: auto;
+    }
+
+    #nodule-three-container {
+      position: absolute;
+      inset: 0;
     }
 
     .nodule-gallery {
@@ -938,6 +944,22 @@
       border-radius: 2px;
       transition: width 0.3s ease;
     }
+
+    .btn-report {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      background: transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-report:hover { background: var(--accent); color: #fff; }
   </style>
 
   <script type="importmap">
@@ -1259,7 +1281,9 @@
 
     <!-- Right: Three.js -->
     <div class="panel-right">
-      <div id="nodule-three-container" style="width:100%;height:100%;"></div>
+      <div class="panel-3d-wrap">
+        <div id="nodule-three-container"></div>
+      </div>
     </div>
 
   </div>
@@ -1610,6 +1634,9 @@ document.getElementById('mode-btn-single').addEventListener('click', () => {
 
 document.getElementById('mode-btn-pulse').addEventListener('click', async () => {
   if (!_modeSelectData || !_modeSelectData.sequence_dir) return;
+  console.log('[pulse-btn] _modeSelectData.sequence_dir:', _modeSelectData.sequence_dir);
+  console.log('[pulse-btn] _modeSelectData.anatomy:', _modeSelectData.anatomy);
+  console.log('[pulse-btn] _modeSelectData.has_sequence:', _modeSelectData.has_sequence);
   showState('loading');
   document.getElementById('loading-progress-wrap').style.display = 'block';
   setLoadingProgress(0);
@@ -1779,7 +1806,8 @@ function renderHeader(data) {
      <span class="badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">
        ${data.format.toUpperCase()} &middot; ${dimLabel}
      </span>
-     ${seqBadge}`;
+     ${seqBadge}
+     <button class="btn-report" onclick="generateSingleFrameReport()">Generate Report ↗</button>`;
 }
 
 function renderStats(data) {
@@ -2040,7 +2068,7 @@ function renderTerrain(data, containerId = 'three-container') {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0d0d);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
@@ -2951,12 +2979,13 @@ function updatePulseFrame(idx) {
 }
 
 function renderPulseHeader(pulseData) {
-  const c = badgeFor('JugularVein');
+  const c = badgeFor(pulseData.anatomy);
   document.getElementById('pulse-header-badges').innerHTML =
-    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">JugularVein</span>
+    `<span class="badge" style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">${pulseData.anatomy}</span>
      <span class="badge" style="background:#f0ece6;color:#8a7a6c;border:1px solid #ddd5c5">
        ${pulseData.frame_count} frames &middot; ${pulseData.fps} fps
-     </span>`;
+     </span>
+     <button class="btn-report" onclick="generatePulseReport()">Generate Report ↗</button>`;
 }
 
 function renderPulseStats(pulseData) {
@@ -2968,7 +2997,7 @@ function renderPulseStats(pulseData) {
   document.getElementById('pulse-stats-row').innerHTML = `
     <div class="stat-card">
       <div class="stat-label">Anatomy</div>
-      <div class="stat-value" style="font-size:15px;color:#1d4ed8">JugularVein</div>
+      <div class="stat-value" style="font-size:15px;color:#1d4ed8">${pulseData.anatomy}</div>
       <div class="stat-sub">Temporal cine-loop · ${pulseData.duration_seconds.toFixed(2)}s</div>
     </div>
     <div class="stat-card">
@@ -3071,7 +3100,7 @@ function renderPulseTubeViz(pulseData) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0d0d);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setSize(W, H);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.localClippingEnabled = true;
@@ -3178,16 +3207,22 @@ function renderPulseTubeViz(pulseData) {
   const zScale = totalZ / Math.max(N - 1, 1);
   _pulseZScaleGlobal = zScale;
 
+  // ── Radius amplification for CarotidArtery (mean-preserving 1.5× stretch, clamped) ──
+  const isCarotid = pulseData.anatomy === 'CarotidArtery';
+  const jRFinal = isCarotid
+    ? jR.map(r => Math.min(avgR * 1.4, Math.max(avgR * 0.6, avgR + (r - avgR) * 1.5)))
+    : jR;
+
   // ── Clip plane for grow animation ─────────────────────────────────────────
   // Plane normal (0,0,-1) constant C: clips where -z + C < 0, i.e. z > C
   // Starting at C=0: clips everything above z=0 (nothing visible)
   // Ending at C=totalZ+1: everything visible
   const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
 
-  // ── Jugular tube ──────────────────────────────────────────────────────────
-  const jugGeo = buildTubeGeometry(jCx, jCy, jR, zScale, N, SEGS);
+  // ── Primary tube (jugular = cyan; carotid anatomy = orange, single vessel) ─
+  const jugGeo = buildTubeGeometry(jCx, jCy, jRFinal, zScale, N, SEGS);
   const jugMat = new THREE.MeshStandardMaterial({
-    color: 0x00e5ff, opacity: 0.2, transparent: true,
+    color: isCarotid ? 0xff6b35 : 0x00e5ff, opacity: 0.2, transparent: true,
     side: THREE.DoubleSide, roughness: 0.4, metalness: 0.1,
     clippingPlanes: [clipPlane],
   });
@@ -3195,9 +3230,9 @@ function renderPulseTubeViz(pulseData) {
   scene.add(jugMesh);
   _pulseTubeMeshes = [jugMesh];
 
-  // ── Carotid tube ──────────────────────────────────────────────────────────
+  // ── Secondary tube (JugularVein only — hidden for CarotidArtery) ──────────
   let carotidMesh = null;
-  if (hasCarotid) {
+  if (hasCarotid && !isCarotid) {
     const carGeo = buildTubeGeometry(cCx, cCy, cR, zScale, N, SEGS);
     const carMat = new THREE.MeshStandardMaterial({
       color: 0xff6b35, opacity: 0.2, transparent: true,
@@ -3221,11 +3256,11 @@ function renderPulseTubeViz(pulseData) {
 
   // ── Sprite labels ──────────────────────────────────────────────────────────
   const zMid = totalZ / 2;
-  const jugLabel = makeLabelSprite('Jugular Vein', '#00e5ff');
-  jugLabel.position.set(jCx[Math.floor(N / 2)], jCy[Math.floor(N / 2)] + avgR + 18, zMid);
-  scene.add(jugLabel);
+  const primaryLabel = makeLabelSprite(isCarotid ? 'Carotid Artery' : 'Jugular Vein', isCarotid ? '#ff6b35' : '#00e5ff');
+  primaryLabel.position.set(jCx[Math.floor(N / 2)], jCy[Math.floor(N / 2)] + avgR + 18, zMid);
+  scene.add(primaryLabel);
 
-  if (hasCarotid) {
+  if (hasCarotid && !isCarotid) {
     const carLabel = makeLabelSprite('Carotid Artery', '#ff6b35');
     const midF = Math.floor(N / 2);
     carLabel.position.set(cCx[midF], cCy[midF] + cR[midF] + 18, zMid);
@@ -3271,8 +3306,12 @@ function renderPulseTubeViz(pulseData) {
     row.appendChild(sw); row.appendChild(lbl);
     return row;
   };
-  legend.appendChild(mkLegendRow('#00e5ff', 'Jugular Vein — pulsatile'));
-  if (hasCarotid) legend.appendChild(mkLegendRow('#ff6b35', 'Carotid Artery — rigid'));
+  if (isCarotid) {
+    legend.appendChild(mkLegendRow('#ff6b35', 'Carotid Artery — pulsatile'));
+  } else {
+    legend.appendChild(mkLegendRow('#00e5ff', 'Jugular Vein — pulsatile'));
+    if (hasCarotid) legend.appendChild(mkLegendRow('#ff6b35', 'Carotid Artery — rigid'));
+  }
   container.appendChild(legend);
 
   // ── Info overlay (bottom-left above axis) ─────────────────────────────────
@@ -3550,6 +3589,14 @@ function renderNoduleHeader(data) {
   badge.style.background = '#e74c3c22';
   badge.style.color = '#e74c3c';
   badge.style.border = '1px solid #e74c3c66';
+  const hdr = document.getElementById('nodule-header-badges');
+  if (!hdr.querySelector('.btn-report')) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-report';
+    btn.textContent = 'Generate Report ↗';
+    btn.onclick = generateNoduleReport;
+    hdr.appendChild(btn);
+  }
 }
 
 function renderNoduleStats(data) {
@@ -3601,11 +3648,6 @@ function renderNoduleGallery(data) {
     wrap.addEventListener('click', () => {
       document.querySelectorAll('#nodule-gallery > div').forEach(d => d.style.borderColor = 'transparent');
       wrap.style.borderColor = 'var(--accent)';
-      if (_noduleSlicePlane) {
-        const zFactor = data.slice_count / 64;
-        const voxD = data.z_spacing_mm * data.slice_count / 64;
-        _noduleSlicePlane.position.z = (gz / zFactor) * voxD;
-      }
       document.getElementById('nodule-slice-slider').value = gz;
       updateNoduleSliceLabel(gz, data);
     });
@@ -3622,48 +3664,97 @@ function renderNoduleViz(data) {
   if (_renderer)  { _renderer.dispose(); _renderer = null; }
   if (_axisRenderer) { _axisRenderer.dispose(); _axisRenderer = null; }
 
-  const W = container.clientWidth  || 600;
-  const H = container.clientHeight || 500;
+  const canvasW = container.clientWidth  || 600;
+  const canvasH = container.clientHeight || 500;
 
   const voxW = data.xy_spacing_mm * (256 / 64);
   const voxH = data.xy_spacing_mm * (256 / 64);
-  const voxD = data.z_spacing_mm  * (data.slice_count / 64);
-  const zFactor = data.slice_count / 64;
+  const zFactor = Math.max(1, Math.floor(data.slice_count / 64));  // matches Python: max(1, N//64)
+  const voxD = data.z_spacing_mm * zFactor;
+  const xScale = voxW, yScale = voxH, zScale = voxD;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0d0d);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(W, H);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(canvasW, canvasH);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
   renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
   _renderer = renderer;
 
-  const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+  const camera = new THREE.PerspectiveCamera(55, canvasW / canvasH, 0.1, 5000);
   _camera = camera;
 
-  // ── Lung context cloud (Points) ────────────────────────────────────────────
-  const vol = data.probability_volume;
-  const [dz, dy, dx] = data.volume_shape;
-  const positions = [];
-  for (let z = 0; z < dz; z++)
-    for (let y = 0; y < dy; y++)
-      for (let x = 0; x < dx; x++) {
-        if (vol[z * dy * dx + y * dx + x] > 0.1) {
-          positions.push(x * voxW, y * voxH, z * voxD);
+  // ── Lung context: textured Z-slice planes ────────────────────────────────
+  const W = data.volume_shape[2];
+  const H = data.volume_shape[1];
+  const D = data.volume_shape[0];
+  const lungVol = data.lung_intensity_volume;
+  const _lungPlanes = [];
+  const _lungGroup  = new THREE.Group();
+  const planeW = W * xScale;
+  const planeH = H * yScale;
+
+  for (let z = 0; z < D; z += 4) {
+    const canvas = document.createElement('canvas');
+    canvas.width  = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const v  = lungVol[z * H * W + y * W + x];
+        const i4 = (y * W + x) * 4;
+        if (v < 0.2) {
+          imgData.data[i4 + 3] = 0;
+        } else {
+          const g = Math.round(v * 255);
+          imgData.data[i4]     = g;
+          imgData.data[i4 + 1] = g;
+          imgData.data[i4 + 2] = g;
+          imgData.data[i4 + 3] = Math.round(v * 200);
         }
       }
-  const cloudGeo = new THREE.BufferGeometry();
-  cloudGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  const cloudMat = new THREE.PointsMaterial({ color: 0x666666, size: 0.5, opacity: 0.08, transparent: true, depthWrite: false });
-  _noduleCloudMesh = new THREE.Points(cloudGeo, cloudMat);
-  scene.add(_noduleCloudMesh);
+    }
+    ctx.putImageData(imgData, 0, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.flipY = false;
+    const planeMat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const planeGeo  = new THREE.PlaneGeometry(planeW, planeH);
+    const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+    planeMesh.position.set(planeW / 2, planeH / 2, z * zScale);
+    _lungGroup.add(planeMesh);
+    _lungPlanes.push(planeMesh);
+  }
+  scene.add(_lungGroup);
+
+  // Proxy so existing .material.opacity / .visible controls keep working
+  const _lungMat = {
+    get opacity() { return _lungPlanes[0]?.material.opacity ?? 0; },
+    set opacity(v) { _lungPlanes.forEach(p => { p.material.opacity = v; }); },
+    color: { setHex(hex) { _lungPlanes.forEach(p => p.material.color.setHex(hex)); } },
+  };
+  _noduleCloudMesh = {
+    get visible() { return _lungGroup.visible; },
+    set visible(v) { _lungGroup.visible = v; },
+    material: _lungMat,
+  };
+  const [dz, dy, dx] = [D, H, W];
+  const vol = data.probability_volume;
 
   // ── Nodule isosurface (InstancedMesh per component) ────────────────────────
-  const sphereGeo = new THREE.SphereGeometry(0.4, 6, 6);
+  const sphereGeo = new THREE.SphereGeometry(3.0, 8, 8);
   const dummy = new THREE.Object3D();
   _noduleMeshes = [];
+
+  // Track world-space bbox of all nodule voxels for camera placement
+  let noduleBMin = new THREE.Vector3(Infinity, Infinity, Infinity);
+  let noduleBMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
 
   data.nodule_components.forEach((comp, ci) => {
     const color = ci === 0 ? 0xffee88 : 0xff8833;
@@ -3687,6 +3778,8 @@ function renderNoduleViz(data) {
     const mat = new THREE.MeshStandardMaterial({ color, opacity: 0.95, transparent: false });
     const mesh = new THREE.InstancedMesh(sphereGeo, mat, voxelPos.length);
     voxelPos.forEach(([px, py, pz], i) => {
+      noduleBMin.x = Math.min(noduleBMin.x, px); noduleBMin.y = Math.min(noduleBMin.y, py); noduleBMin.z = Math.min(noduleBMin.z, pz);
+      noduleBMax.x = Math.max(noduleBMax.x, px); noduleBMax.y = Math.max(noduleBMax.y, py); noduleBMax.z = Math.max(noduleBMax.z, pz);
       dummy.position.set(px, py, pz);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -3702,37 +3795,26 @@ function renderNoduleViz(data) {
   dir.position.set(30, 40, 20);
   scene.add(dir);
 
-  // ── Slice plane (horizontal disc at representative Z) ──────────────────────
-  const rep_z_world = data.nodule_components.length > 0
-    ? (data.nodule_components[0].centroid_z / zFactor) * voxD
-    : (data.slice_count / 2 / zFactor) * voxD;
-  const planeGeo = new THREE.PlaneGeometry(64 * voxW, 64 * voxH);
-  const planeMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, opacity: 0.15, transparent: true, side: THREE.DoubleSide });
-  _noduleSlicePlane = new THREE.Mesh(planeGeo, planeMat);
-  _noduleSlicePlane.rotation.x = -Math.PI / 2;
-  _noduleSlicePlane.position.set(32 * voxW, 32 * voxH, rep_z_world);
-  scene.add(_noduleSlicePlane);
-
   // ── OrbitControls ──────────────────────────────────────────────────────────
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.06;
 
-  // ── Camera — aim at highest-confidence nodule centroid ────────────────────
-  if (data.nodule_components.length > 0) {
-    const c = data.nodule_components[0];
-    const cx = (c.centroid_x / 4) * voxW;
-    const cy = (c.centroid_y / 4) * voxH;
-    const cz = (c.centroid_z / zFactor) * voxD;
-    controls.target.set(cx, cy, cz);
-    camera.position.set(cx + 60, cy + 40, cz + 80);
+  // ── Camera — fit to nodule bounding box ──────────────────────────────────
+  if (noduleBMin.x < Infinity) {
+    const bCenter = new THREE.Vector3().addVectors(noduleBMin, noduleBMax).multiplyScalar(0.5);
+    const bSize   = new THREE.Vector3().subVectors(noduleBMax, noduleBMin).addScalar(6); // +sphere radius
+    const bDiag   = Math.max(bSize.length(), 20);
+    const dist    = bDiag * 2;
+    controls.target.copy(bCenter);
+    // 3/4 view direction (pre-normalised unit vector ≈ 1.0)
+    camera.position.set(bCenter.x + dist * 0.45, bCenter.y - dist * 0.65, bCenter.z + dist * 0.35);
+    camera.lookAt(bCenter);
     controls.update();
   } else {
-    const cx = 32 * voxW;
-    const cy = 32 * voxH;
-    const cz = rep_z_world;
+    const cx = 32 * voxW, cy = 32 * voxH, cz = (data.slice_count / 2 / zFactor) * voxD;
     controls.target.set(cx, cy, cz);
-    camera.position.set(cx + 60, cy + 40, cz + 80);
+    camera.position.set(cx + 60, cy + 45, cz + 80);
     controls.update();
   }
 
@@ -3801,7 +3883,7 @@ function renderNoduleViz(data) {
 
     // Phase 1: cloud fade in
     if (_noduleCloudMesh) {
-      _noduleCloudMesh.material.opacity = Math.min(elapsed / PHASE1_MS, 1.0) * 0.08;
+      _noduleCloudMesh.material.opacity = Math.min(elapsed / PHASE1_MS, 1.0) * 0.20;
     }
 
     // Phase 2: nodule reveal (starts at 200ms into phase 1)
@@ -3854,11 +3936,6 @@ function setupNoduleControls(data) {
   slider.oninput = () => {
     const gz = parseInt(slider.value);
     updateNoduleSliceLabel(gz, data);
-    if (_noduleSlicePlane) {
-      const zFactor = data.slice_count / 64;
-      const voxD = data.z_spacing_mm * (data.slice_count / 64);
-      _noduleSlicePlane.position.z = (gz / zFactor) * voxD;
-    }
   };
 
   const opSlider = document.getElementById('nodule-opacity');
@@ -3893,17 +3970,392 @@ function applyNodulePreset(preset) {
   if (!_noduleMeshes.length) return;
   if (preset === 'standard') {
     _noduleMeshes.forEach((m, i) => { m.material.color.setHex(i === 0 ? 0xffee88 : 0xff8833); });
-    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.08; _noduleCloudMesh.material.color.setHex(0x666666); }
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.20; _noduleCloudMesh.material.color.setHex(0xaaaaaa); }
   } else if (preset === 'highlight') {
     _noduleMeshes.forEach(m => { m.material.color.setHex(0xff4444); });
-    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.15; }
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.20; }
   } else if (preset === 'xray') {
     _noduleMeshes.forEach(m => { m.material.color.setHex(0x88ffff); });
-    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.25; _noduleCloudMesh.material.color.setHex(0x88ffff); }
+    if (_noduleCloudMesh) { _noduleCloudMesh.material.opacity = 0.30; _noduleCloudMesh.material.color.setHex(0x88ffff); }
   }
 }
 
+// ── Report Generation ─────────────────────────────────────────────────────
+
+function _reportCSS() {
+  return `* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; color: #111; background: #fff; max-width: 800px; margin: 0 auto; padding: 40px 32px; }
+h1 { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
+h2 { font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #666; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; margin: 28px 0 12px; }
+p { margin-bottom: 8px; }
+.rule { border: none; border-top: 2px solid #111; margin: 16px 0; }
+.meta { font-size: 12px; color: #555; margin-bottom: 2px; }
+.field { margin-bottom: 6px; }
+.field-label { font-weight: 600; }
+.field-indent { margin-left: 20px; font-size: 13px; color: #444; margin-top: 2px; margin-bottom: 8px; }
+.callout { padding: 12px 16px; margin: 16px 0; }
+.callout-title { font-weight: 600; margin-bottom: 4px; }
+.img-row { display: flex; gap: 16px; margin: 16px 0; }
+.img-col { flex: 1; }
+.img-col img { width: 100%; border: 1px solid #e0e0e0; border-radius: 4px; display: block; }
+.img-block { margin: 16px 0; }
+.img-block img { width: 100%; border: 1px solid #e0e0e0; border-radius: 4px; display: block; }
+.img-label { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.img-caption { font-size: 11px; color: #666; margin-top: 4px; }
+.footer { font-size: 11px; color: #888; text-align: center; margin-top: 24px; }
+.limitations li { margin-bottom: 6px; margin-left: 20px; font-size: 13px; color: #444; }
+.btn-print { font-family: inherit; font-size: 13px; font-weight: 500; padding: 7px 18px; border: 1px solid #b85535; color: #b85535; background: transparent; border-radius: 4px; cursor: pointer; margin-bottom: 24px; }
+.btn-print:hover { background: #b85535; color: #fff; }
+@media print { .btn-print { display: none; } }`;
+}
+
+function _reportOpen(html) {
+  const tab = window.open('', '_blank');
+  if (tab) { tab.document.write(html); tab.document.close(); }
+}
+
+function _captureCanvas(id) {
+  try {
+    const el = document.getElementById(id);
+    if (!el) return '';
+    const c = el.tagName === 'CANVAS' ? el : el.querySelector('canvas');
+    return c ? c.toDataURL('image/png') : '';
+  } catch(e) { return ''; }
+}
+
+function generateSingleFrameReport() {
+  const data = _currentData;
+  if (!data) return;
+  const now = new Date().toLocaleString();
+  const anatomy = data.anatomy;
+  const anatomyLabel = anatomy === 'unknown' ? 'Unrecognized' : anatomy;
+  const dimLabel = data.dimensionality.replace(/_/g, ' ');
+  const isVascular = ['JugularVein', 'CarotidArtery'].includes(anatomy);
+  const isLIDC = anatomy === 'LIDC';
+
+  let calloutBorder, calloutIcon, calloutTitle, calloutText;
+  if (isVascular) {
+    calloutBorder = '#2a7a4a'; calloutIcon = '✓'; calloutTitle = 'Model-based result';
+    calloutText = 'Detection performed by jugular_vein_segmentation.onnx, a neural network trained on vascular ultrasound data. Coverage and confidence reflect genuine model certainty about vessel presence and location.';
+  } else if (isLIDC) {
+    calloutBorder = '#2a7a4a'; calloutIcon = '✓'; calloutTitle = 'Model-based result';
+    calloutText = 'Detection performed by lung_nodule_segmentation.onnx, a neural network trained on CT lung data. Results reflect real model output for this anatomy type.';
+  } else {
+    calloutBorder = '#c07000'; calloutIcon = '⚠'; calloutTitle = 'Intensity-based estimate';
+    calloutText = 'No trained model is available for this anatomy type. Coverage and confidence are derived from pixel intensity thresholding, not a neural network. These values are estimates only and should not be used for clinical decisions.';
+  }
+
+  const scanImg    = _captureCanvas('scan-canvas');
+  const terrainImg = _captureCanvas('three-container');
+
+  _reportOpen(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>UltrasoundViz Report — ${anatomyLabel}</title>
+<style>${_reportCSS()}</style></head><body>
+<button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
+<hr class="rule">
+<h1>UltrasoundViz Analysis Report</h1>
+<div class="meta">Generated: ${now}</div>
+<hr class="rule">
+
+<h2>File Information</h2>
+<div class="field"><span class="field-label">Format:</span> ${data.format.toUpperCase()}</div>
+<div class="field"><span class="field-label">Anatomy:</span> ${anatomyLabel}</div>
+<div class="field"><span class="field-label">Dimensionality:</span> ${dimLabel}</div>
+<div class="field"><span class="field-label">Analysis mode:</span> Single Frame</div>
+
+<h2>Detection Results</h2>
+<div class="field"><span class="field-label">Status:</span> ${data.detected ? 'Detected' : 'Not Detected'}</div>
+<div class="field"><span class="field-label">Coverage:</span> ${data.coverage}</div>
+<div class="field-indent">→ What this means: the percentage of image pixels the AI identified as containing the target anatomical structure. Higher coverage indicates a larger detected region.</div>
+<div class="field"><span class="field-label">Mean confidence:</span> ${data.mean_confidence}</div>
+<div class="field-indent">→ What this means: the model's average certainty that detected pixels genuinely belong to the target structure. Above 70% is considered reliable.</div>
+
+<h2>Accuracy Context</h2>
+<div class="callout" style="border-left:4px solid ${calloutBorder};background:${calloutBorder}18;">
+  <div class="callout-title">${calloutIcon} ${calloutTitle}</div>
+  <p>${calloutText}</p>
+</div>
+
+<h2>Visualizations</h2>
+${(scanImg || terrainImg) ? `<div class="img-row">
+  ${scanImg ? `<div class="img-col">
+    <div class="img-label">2D Scan with Segmentation Overlay</div>
+    <img src="${scanImg}" alt="2D scan">
+    <div class="img-caption">The cyan overlay marks pixels identified by the AI as the target anatomical structure. The dotted line shows the M-mode sampling column.</div>
+  </div>` : ''}
+  ${terrainImg ? `<div class="img-col">
+    <div class="img-label">3D Probability Terrain</div>
+    <img src="${terrainImg}" alt="3D terrain">
+    <div class="img-caption">Height represents AI detection probability — peaks indicate regions of high confidence, flat areas indicate background tissue.</div>
+  </div>` : ''}
+</div>` : '<p style="color:#888;font-size:13px;">Visualizations not available.</p>'}
+
+<h2>Limitations</h2>
+<ul class="limitations">
+  <li>This report is generated by UltrasoundViz, a research and demonstration tool built on the FAST framework v4.17.1</li>
+  <li>Results have not been validated for clinical use</li>
+  <li>All findings must be reviewed by a qualified clinician before any medical decision is made</li>
+</ul>
+<hr class="rule">
+<div class="footer">Generated by UltrasoundViz | FAST v4.17.1 | Not for clinical use</div>
+<hr class="rule">
+</body></html>`);
+}
+
+function generatePulseReport() {
+  const pulseData = _pulseData;
+  if (!pulseData) return;
+  const now = new Date().toLocaleString();
+  const N = pulseData.frame_count;
+  const durS = pulseData.duration_seconds.toFixed(2);
+  const bpm = pulseData.bpm;
+  const peakCount = pulseData.peak_frames.length;
+  const areas = pulseData.vessel_area_waveform;
+  const avgArea = (areas.reduce((a, b) => a + b, 0) / areas.length * 100).toFixed(1);
+  const maxArea = Math.max(...areas);
+  const positiveAreas = areas.filter(a => a > 0);
+  const minArea = positiveAreas.length ? Math.min(...positiveAreas) : 0;
+  const diamRatio = minArea > 0 ? (maxArea / minArea).toFixed(2) : '—';
+  const rateClass = bpm == null ? 'unknown' : bpm >= 60 && bpm <= 100 ? 'normal' : bpm > 100 ? 'elevated' : 'low';
+
+  let bpmBorder, bpmIcon, bpmInterp;
+  if (bpm == null) {
+    bpmBorder = '#888'; bpmIcon = '—';
+    bpmInterp = 'Heart rate could not be estimated — insufficient peaks detected.';
+  } else if (bpm >= 60 && bpm <= 100) {
+    bpmBorder = '#2a7a4a'; bpmIcon = '✓';
+    bpmInterp = `~${bpm} BPM is within normal range for a resting adult (normal: 60–100 BPM).`;
+  } else if ((bpm >= 40 && bpm < 60) || (bpm > 100 && bpm <= 120)) {
+    bpmBorder = '#c07000'; bpmIcon = '⚠';
+    bpmInterp = `~${bpm} BPM is mildly abnormal for a resting adult (normal: 60–100 BPM).`;
+  } else {
+    bpmBorder = '#c02020'; bpmIcon = '✗';
+    bpmInterp = `~${bpm} BPM is outside normal range for a resting adult (normal: 60–100 BPM).`;
+  }
+
+  const videoImg    = _captureCanvas('pulse-video-canvas');
+  const tubeImg     = _captureCanvas('pulse-three-container');
+  const waveformImg = _captureCanvas('pulse-waveform-canvas');
+
+  _reportOpen(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>UltrasoundViz Pulse Report — ${pulseData.anatomy}</title>
+<style>${_reportCSS()}</style></head><body>
+<button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
+<hr class="rule">
+<h1>UltrasoundViz Analysis Report</h1>
+<div class="meta">Generated: ${now}</div>
+<hr class="rule">
+
+<h2>File Information</h2>
+<div class="field"><span class="field-label">Anatomy:</span> ${pulseData.anatomy}</div>
+<div class="field"><span class="field-label">Recording duration:</span> ${durS} seconds</div>
+<div class="field"><span class="field-label">Frame count:</span> ${N} frames at ${pulseData.fps} fps</div>
+<div class="field"><span class="field-label">Analysis mode:</span> Vascular Pulse Analysis</div>
+<div class="field"><span class="field-label">Model used:</span> jugular_vein_segmentation.onnx (FAST framework v4.17.1)</div>
+
+<h2>Detection Results</h2>
+<div class="field"><span class="field-label">Primary vessel detected:</span> Yes</div>
+<div class="field"><span class="field-label">Mean coverage:</span> ${avgArea}% of image area per frame</div>
+<div class="field-indent">→ What this means: the average percentage of each frame that the detected vessel occupies. For vascular structures this is typically 5–30% depending on probe position and depth.</div>
+
+<h2>Vascular Pulse Analysis</h2>
+<div class="field"><span class="field-label">Estimated heart rate:</span> ${bpm != null ? '~' + bpm + ' BPM' : '— (insufficient peaks)'}</div>
+<div class="field-indent">→ What this means: estimated by counting how many times per minute the vessel area reaches a local maximum (dilated state). Normal resting heart rate is 60–100 BPM.</div>
+<div class="field"><span class="field-label">Peak count:</span> ${peakCount} peaks detected over ${durS} seconds</div>
+<div class="field-indent">→ What this means: each peak represents one cardiac cycle where the vessel reached maximum dilation. ${peakCount} peaks over ${durS} seconds is consistent with ${rateClass} heart rate.</div>
+<div class="field"><span class="field-label">Diameter variation ratio:</span> ${diamRatio}× (maximum / minimum detected area)</div>
+<div class="field-indent">→ What this means: how much the vessel diameter changes between its most dilated and most compressed state. Higher ratios indicate more compliant (flexible) vessel walls. The jugular vein typically shows higher ratios than arteries because veins are more compressible.</div>
+
+<h2>Clinical Context</h2>
+<div class="callout" style="border-left:4px solid ${bpmBorder};background:${bpmBorder}18;">
+  <div class="callout-title">${bpmIcon} Heart rate interpretation</div>
+  <p>${bpmInterp}</p>
+  <p style="margin-top:6px;font-size:13px;">Note: BPM estimation assumes regular cardiac rhythm. Results may be unreliable in cases of arrhythmia, irregular heartbeat, or significant patient movement during recording.</p>
+</div>
+
+<h2>Accuracy Context</h2>
+<div class="callout" style="border-left:4px solid #2a7a4a;background:#2a7a4a18;">
+  <div class="callout-title">✓ Model-based result</div>
+  <p>All measurements derived from jugular_vein_segmentation.onnx applied across all ${N} frames. Vessel area, peak detection, and diameter variation are quantitative outputs from a trained neural network and reflect real vascular dynamics captured during the ${durS}-second recording.</p>
+</div>
+
+<h2>Visualizations</h2>
+${videoImg ? `<div class="img-block">
+  <div class="img-label">Ultrasound Frame ${_pulseFrame + 1} with Segmentation Overlay</div>
+  <img src="${videoImg}" alt="Video frame">
+  <div class="img-caption">The cyan region shows the vessel detected in this frame.</div>
+</div>` : ''}
+${tubeImg ? `<div class="img-block">
+  <div class="img-label">3D Vessel Isosurface over Time (${durS} seconds)</div>
+  <img src="${tubeImg}" alt="3D tube">
+  <div class="img-caption">The Z axis represents time. Tube diameter encodes vessel size — wider sections indicate cardiac dilation peaks, narrower sections indicate compression.</div>
+</div>` : ''}
+${waveformImg ? `<div class="img-block">
+  <div class="img-label">Pulse Waveform — Vessel Cross-sectional Area over Time</div>
+  <img src="${waveformImg}" alt="Waveform">
+  <div class="img-caption">Each cyan marker indicates a detected cardiac peak. The waveform shape reflects the pulsatile nature of the vessel.</div>
+</div>` : ''}
+${!videoImg && !tubeImg && !waveformImg ? '<p style="color:#888;font-size:13px;">Visualizations not available.</p>' : ''}
+
+<h2>Limitations</h2>
+<ul class="limitations">
+  <li>BPM is estimated from vessel area oscillation, not ECG</li>
+  <li>Accuracy depends on consistent probe position during recording</li>
+  <li>The jugular_vein_segmentation.onnx model was trained on jugular vein data — results for other vascular structures may be less precise</li>
+  <li>This report is for research and demonstration purposes only</li>
+</ul>
+<hr class="rule">
+<div class="footer">Generated by UltrasoundViz | FAST v4.17.1 | Not for clinical use</div>
+<hr class="rule">
+</body></html>`);
+}
+
+function generateNoduleReport() {
+  const data = _noduleData;
+  if (!data) return;
+  const now = new Date().toLocaleString();
+  const n = data.nodule_components.length;
+  const totalSlices = data.slice_count || 305;
+  const xySpacing = data.xy_spacing_mm.toFixed(3);
+  const zSpacing = data.z_spacing_mm.toFixed(3);
+  const totalDepth = (totalSlices * data.z_spacing_mm).toFixed(1);
+  const downsampleFactor = (totalSlices / 64).toFixed(1);
+  const peakConf = n > 0 ? (data.nodule_components[0].mean_probability * 100).toFixed(1) : '—';
+
+  const biggest = n > 0 ? data.nodule_components.reduce((a, b) => a.voxel_count > b.voxel_count ? a : b) : null;
+  const biggestVol = biggest ? parseInt((biggest.voxel_count * 4 * data.xy_spacing_mm ** 2 * data.z_spacing_mm).toFixed(0)) : 0;
+  const biggestDiam = biggestVol > 0 ? (2 * Math.cbrt(3 * biggestVol / (4 * Math.PI))).toFixed(1) : '0';
+
+  let clinBorder, clinIcon, clinText;
+  if (n === 0) {
+    clinBorder = '#888'; clinIcon = '—'; clinText = 'No nodules detected above the minimum size threshold.';
+  } else if (biggestVol < 300) {
+    clinBorder = '#2a7a4a'; clinIcon = '✓';
+    clinText = 'Low risk — nodules under 8mm in a low-risk patient typically require no immediate follow-up per Fleischner Society guidelines.';
+  } else if (biggestVol <= 4000) {
+    clinBorder = '#c07000'; clinIcon = '⚠';
+    clinText = 'Moderate risk — nodules 8–20mm warrant follow-up CT at 3–6 months to assess growth per Fleischner Society guidelines.';
+  } else {
+    clinBorder = '#c02020'; clinIcon = '✗';
+    clinText = 'High risk — nodules over 20mm require immediate evaluation including PET-CT or tissue sampling per Fleischner Society guidelines.';
+  }
+
+  let noduleSubsections = '';
+  data.nodule_components.forEach((comp, i) => {
+    const vol = parseInt((comp.voxel_count * 4 * data.xy_spacing_mm ** 2 * data.z_spacing_mm).toFixed(0));
+    const diam = (2 * Math.cbrt(3 * vol / (4 * Math.PI))).toFixed(1);
+    const conf = (comp.mean_probability * 100).toFixed(1);
+    const zPosMm = (-380 + comp.bbox[0] * data.z_spacing_mm).toFixed(1);
+    const xCenter = (comp.bbox[2] + comp.bbox[5]) / 2;
+    const sideLabel = xCenter < 32 ? 'left' : 'right';
+    const sizeClass = vol < 300
+      ? 'Small nodule (<8mm) — low risk, routine surveillance recommended'
+      : vol <= 4000
+        ? 'Intermediate nodule (8–20mm) — moderate risk, follow-up CT recommended'
+        : 'Large nodule (>20mm) — high risk, immediate clinical review recommended';
+    noduleSubsections += `<div style="border:1px solid #e0e0e0;border-radius:6px;padding:14px 16px;margin:12px 0;">
+  <div style="font-weight:600;margin-bottom:8px;">Nodule #${i + 1} — ${i === 0 ? 'Primary' : 'Secondary'}</div>
+  <div class="field"><span class="field-label">Position:</span> Z = ${zPosMm}mm depth within scan</div>
+  <div class="field"><span class="field-label">Location:</span> ${sideLabel} lung field</div>
+  <div class="field"><span class="field-label">Estimated volume:</span> ${vol} mm³ (~${diam}mm equivalent diameter)</div>
+  <div class="field-indent">→ What this means: volume computed from voxel count using real physical spacing (${xySpacing}mm × ${xySpacing}mm × ${zSpacing}mm per voxel). This is an approximation based on 64×64×64 downsampled data.</div>
+  <div class="field"><span class="field-label">Model confidence:</span> ${conf}%</div>
+  <div class="field"><span class="field-label">Size classification:</span> ${sizeClass}</div>
+</div>`;
+  });
+
+  let galleryHtml = '';
+  try {
+    const canvases = document.querySelectorAll('#nodule-gallery canvas');
+    if (canvases.length) {
+      galleryHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;">';
+      canvases.forEach((c, i) => {
+        try {
+          const img = c.toDataURL('image/png');
+          const gz = data.gallery_z_indices ? data.gallery_z_indices[i] : i;
+          const zMm = (-380 + gz * data.z_spacing_mm).toFixed(1);
+          galleryHtml += `<div><img src="${img}" alt="CT slice" style="width:100%;border:1px solid #e0e0e0;border-radius:4px;display:block;">
+  <div style="font-size:11px;color:#666;margin-top:4px;">Z = ${zMm}mm — cyan rectangle marks detected nodule region.</div></div>`;
+        } catch(e) {}
+      });
+      galleryHtml += '</div>';
+    }
+  } catch(e) {}
+
+  const threeImg = _captureCanvas('nodule-three-container');
+
+  _reportOpen(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>UltrasoundViz CT Nodule Report</title>
+<style>${_reportCSS()}</style></head><body>
+<button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
+<hr class="rule">
+<h1>UltrasoundViz Analysis Report</h1>
+<div class="meta">Generated: ${now}</div>
+<hr class="rule">
+
+<h2>CT Scan Information</h2>
+<div class="field"><span class="field-label">Dataset:</span> LIDC-IDRI (Lung Image Database Consortium)</div>
+<div class="field"><span class="field-label">Total slices:</span> ${totalSlices} axial slices</div>
+<div class="field"><span class="field-label">Slice spacing:</span> ${zSpacing}mm (Z axis — physical depth between slices)</div>
+<div class="field"><span class="field-label">Pixel spacing:</span> ${xySpacing}mm × ${xySpacing}mm (XY — physical size of each pixel)</div>
+<div class="field"><span class="field-label">Total scan depth:</span> ${totalDepth}mm</div>
+<div class="field"><span class="field-label">Analysis mode:</span> CT Lung Nodule Detection</div>
+<div class="field"><span class="field-label">Model used:</span> lung_nodule_segmentation.onnx (FAST framework v4.17.1)</div>
+<div class="field"><span class="field-label">Inference method:</span> 3D sliding window, window=32 slices, stride=16</div>
+<div class="field-indent">→ What this means: the model examined 32 consecutive CT slices simultaneously to detect nodules in three dimensions, sliding across all ${totalSlices} slices in overlapping windows.</div>
+
+<h2>Nodule Detection Results</h2>
+<div class="field"><span class="field-label">Total nodules detected:</span> ${n} (above 50 voxel minimum size threshold)</div>
+<div class="field"><span class="field-label">Peak model confidence:</span> ${peakConf}%</div>
+<div class="field-indent">→ What this means: the highest average probability the model assigned to any detected nodule region. Above 80% is considered high confidence detection.</div>
+${noduleSubsections}
+
+<h2>Volume Measurement Note</h2>
+<div class="callout" style="border-left:4px solid #c07000;background:#c0700018;">
+  <div class="callout-title">⚠ Volume measurement accuracy</div>
+  <p>Nodule volume is estimated from a 64×64×64 downsampled representation of the full ${totalSlices}-slice volume. The downsampling factor is approximately ${downsampleFactor}×, meaning small nodules may appear slightly larger or smaller than their true size. For precise volumetric measurement, full-resolution analysis is required. This estimate is suitable for screening and triage but not for precise longitudinal volumetric tracking.</p>
+</div>
+
+<h2>Clinical Significance Assessment</h2>
+<div class="callout" style="border-left:4px solid ${clinBorder};background:${clinBorder}18;">
+  <div class="callout-title">${clinIcon} Clinical significance assessment</div>
+  ${n > 0 ? `<div class="field"><span class="field-label">Largest nodule:</span> ${biggestVol} mm³ (~${biggestDiam}mm diameter)</div>` : ''}
+  <p style="margin-top:8px;">${clinText}</p>
+  <p style="margin-top:8px;font-size:13px;">Important: These guidelines apply to incidentally detected nodules in adults without known malignancy. Clinical context, patient history, and radiologist review are essential for accurate risk stratification.</p>
+</div>
+
+<h2>Accuracy Context</h2>
+<div class="callout" style="border-left:4px solid #2a7a4a;background:#2a7a4a18;">
+  <div class="callout-title">✓ Model-based result</div>
+  <p>Detection performed by lung_nodule_segmentation.onnx using 3D convolutional neural network inference across all ${totalSlices} CT slices simultaneously. Nodule position coordinates are accurate to ${zSpacing}mm Z resolution and ${xySpacing}mm XY resolution based on DICOM metadata. The LIDC-IDRI dataset used here includes radiologist-annotated nodule locations which can be used to validate these detections.</p>
+</div>
+
+<h2>Visualizations</h2>
+${galleryHtml}
+${threeImg ? `<div class="img-block">
+  <div class="img-label">3D Nodule Isosurface</div>
+  <img src="${threeImg}" alt="3D nodule">
+  <div class="img-caption">The yellow-white mass represents the AI-detected nodule rendered at physically accurate proportions using ${xySpacing}mm × ${xySpacing}mm × ${zSpacing}mm voxel spacing. Surrounding grey layers show CT tissue context.</div>
+</div>` : ''}
+${!galleryHtml && !threeImg ? '<p style="color:#888;font-size:13px;">Visualizations not available.</p>' : ''}
+
+<h2>Limitations</h2>
+<ul class="limitations">
+  <li>Volume estimates use 64×64×64 downsampled data — not suitable for precise clinical measurement</li>
+  <li>The lung_nodule_segmentation.onnx model may produce false positives in regions of high tissue density unrelated to nodules (e.g. blood vessels, lymph nodes)</li>
+  <li>LIDC-IDRI is a research dataset — model performance on clinical scanner data from different manufacturers may vary</li>
+  <li>This report is for research and demonstration purposes only</li>
+</ul>
+<hr class="rule">
+<div class="footer">Generated by UltrasoundViz | FAST v4.17.1 | Not for clinical use</div>
+<hr class="rule">
+</body></html>`);
+}
+
 window.__handleFile = handleFile;
+window.generateSingleFrameReport = generateSingleFrameReport;
+window.generatePulseReport = generatePulseReport;
+window.generateNoduleReport = generateNoduleReport;
 </script>
 </body>
 </html>

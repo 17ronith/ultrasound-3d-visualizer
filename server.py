@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 from PIL import Image as PILImage
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, gaussian_filter1d, median_filter
 from scipy.signal import find_peaks
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from skimage.filters import threshold_otsu
 from skimage.measure import label, regionprops
 
+import importlib
 import pydicom
 
 import fast
@@ -268,6 +269,8 @@ async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optiona
         PILImage.fromarray(orig_gray).save(buf, format='PNG')
         orig_b64 = base64.b64encode(buf.getvalue()).decode()
 
+        print(f'[analyze] filename={_uploaded_fname!r} anatomy={display_anatomy!r} has_sequence={_has_seq} sequence_dir={_seq_dir!r}')
+
         return {
             'anatomy': display_anatomy,
             'dimensionality': meta['dimensionality'],
@@ -293,7 +296,7 @@ async def analyze(files: List[UploadFile] = File(...), anatomy_override: Optiona
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
+def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps, anatomy='JugularVein'):
     MAX = 200
 
     # Step 3 — Variance map
@@ -325,8 +328,9 @@ def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
     else:
         mean_prob_ds = mean_prob.astype(np.float32)
 
-    # Step 6 — Peak detection
-    peaks, _ = find_peaks(va_norm, height=0.3, distance=15)
+    # Step 6 — Peak detection (carotid has smaller area variation → lower threshold)
+    peak_height = 0.05 if anatomy == 'CarotidArtery' else 0.3
+    peaks, _ = find_peaks(va_norm, height=peak_height, distance=max(15, int(fps * 0.5)))
     peak_frames = peaks.tolist()
     bpm = round((len(peak_frames) / duration_s) * 60, 1) if len(peak_frames) >= 2 else None
 
@@ -352,6 +356,7 @@ def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
         mask_enc_h, mask_enc_w = H_m, W_m
 
     # Step 9 — Vessel component extraction (per-frame connected components)
+    min_area = 500 if anatomy == 'CarotidArtery' else 100
     vessel_components = []
     for pm in prob_maps:
         binary = pm > 0.5
@@ -359,7 +364,7 @@ def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
         props = regionprops(labeled)
         components = []
         for rp in props:
-            if rp.area > 100:
+            if rp.area > min_area:
                 min_row, min_col, max_row, max_col = rp.bbox
                 components.append({
                     'centroid_x': int(round(rp.centroid[1])),
@@ -369,6 +374,74 @@ def _compute_pulse_results(raw_frames, prob_maps, N, duration_s, fps):
                 })
         components.sort(key=lambda c: c['pixel_count'], reverse=True)
         vessel_components.append(components)
+
+    # CarotidArtery smoothing — heavier pipeline to eliminate merge/split centroid jumps
+    if anatomy == 'CarotidArtery':
+        N_frames = len(vessel_components)
+        raw_cx = np.zeros(N_frames, dtype=np.float32)
+        raw_cy = np.zeros(N_frames, dtype=np.float32)
+        raw_rad = np.zeros(N_frames, dtype=np.float32)
+
+        for i, comps in enumerate(vessel_components):
+            if comps:
+                raw_cx[i] = comps[0]['centroid_x']
+                raw_cy[i] = comps[0]['centroid_y']
+                raw_rad[i] = float(np.sqrt(comps[0]['pixel_count'] / np.pi))
+            elif i > 0:
+                raw_cx[i] = raw_cx[i - 1]
+                raw_cy[i] = raw_cy[i - 1]
+                raw_rad[i] = raw_rad[i - 1]
+
+        cx_std_before  = float(np.std(raw_cx))
+        cx_jump_before = float(np.abs(np.diff(raw_cx)).max()) if N_frames > 1 else 0.0
+        cy_std_before  = float(np.std(raw_cy))
+        cy_jump_before = float(np.abs(np.diff(raw_cy)).max()) if N_frames > 1 else 0.0
+        r_std_before   = float(np.std(raw_rad))
+        r_jump_before  = float(np.abs(np.diff(raw_rad)).max()) if N_frames > 1 else 0.0
+        print(f'[CarotidArtery] BEFORE — cx std={cx_std_before:.2f} maxjump={cx_jump_before:.2f} | cy std={cy_std_before:.2f} maxjump={cy_jump_before:.2f} | rad std={r_std_before:.2f} maxjump={r_jump_before:.2f}')
+
+        # Step 2 — Centroid cap: reject >20% jump per frame for x/y only
+        # Radius cap intentionally omitted — preserves genuine diameter pulsation signal
+        for i in range(1, N_frames):
+            if raw_cx[i - 1] != 0 and abs(raw_cx[i] - raw_cx[i - 1]) > abs(raw_cx[i - 1]) * 0.20:
+                raw_cx[i] = raw_cx[i - 1]
+            if raw_cy[i - 1] != 0 and abs(raw_cy[i] - raw_cy[i - 1]) > abs(raw_cy[i - 1]) * 0.20:
+                raw_cy[i] = raw_cy[i - 1]
+
+        # Step 3 — Gaussian smoothing with sigma = frame_count / 20
+        sigma = N_frames / 20.0
+        smth_cx = gaussian_filter1d(raw_cx, sigma=sigma)
+        smth_cy = gaussian_filter1d(raw_cy, sigma=sigma)
+        smth_rad = gaussian_filter1d(raw_rad, sigma=sigma)
+
+        # Step 4 — Median filter with size=11 to kill remaining spikes
+        smth_cx = median_filter(smth_cx, size=11)
+        smth_cy = median_filter(smth_cy, size=11)
+        smth_rad = median_filter(smth_rad, size=11)
+
+        cx_std_after  = float(np.std(smth_cx))
+        cx_jump_after = float(np.abs(np.diff(smth_cx)).max()) if N_frames > 1 else 0.0
+        cy_std_after  = float(np.std(smth_cy))
+        cy_jump_after = float(np.abs(np.diff(smth_cy)).max()) if N_frames > 1 else 0.0
+        r_std_after   = float(np.std(smth_rad))
+        r_jump_after  = float(np.abs(np.diff(smth_rad)).max()) if N_frames > 1 else 0.0
+        print(f'[CarotidArtery] AFTER  — cx std={cx_std_after:.2f} maxjump={cx_jump_after:.2f} | cy std={cy_std_after:.2f} maxjump={cy_jump_after:.2f} | rad std={r_std_after:.2f} maxjump={r_jump_after:.2f}')
+
+        for i in range(N_frames):
+            cx_int = int(round(float(smth_cx[i])))
+            cy_int = int(round(float(smth_cy[i])))
+            pixel_count = max(1, int(round(np.pi * float(smth_rad[i]) ** 2)))
+            if vessel_components[i]:
+                vessel_components[i][0]['centroid_x'] = cx_int
+                vessel_components[i][0]['centroid_y'] = cy_int
+                vessel_components[i][0]['pixel_count'] = pixel_count
+            else:
+                vessel_components[i] = [{
+                    'centroid_x': cx_int,
+                    'centroid_y': cy_int,
+                    'pixel_count': pixel_count,
+                    'bbox': [cy_int - 5, cx_int - 5, cy_int + 5, cx_int + 5],
+                }]
 
     return {
         'variance_map_ds': variance_map_ds, 'nH': nH, 'nW': nW,
@@ -402,6 +475,7 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             key=lambda p: int(re.search(r'_(\d+)$', p.stem).group(1))
         )
         N = len(mhd_files)
+        print(f'[pulse] received sequence_dir={sequence_dir!r}  MHD files found={N}')
         ts_file = data_dir / 'timestamps.fts'
         timestamps = []
         for x in ts_file.read_text().splitlines():
@@ -416,6 +490,23 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
             return
         duration_s = (timestamps[-1] - timestamps[0]) / 1000.0
         fps = (N - 1) / duration_s
+
+        # Detect anatomy from directory path so smoothing can be anatomy-aware
+        anatomy_label = 'CarotidArtery' if 'CarotidArtery' in sequence_dir else 'JugularVein'
+        print(f'[pulse] sequence_dir={sequence_dir!r}')
+        print(f'[pulse] anatomy_label={anatomy_label!r}')
+
+        # Cap CarotidArtery sequences to first 500 frames to limit probe-drift distortion
+        _CAP = 500
+        if anatomy_label == 'CarotidArtery' and N > _CAP:
+            mhd_files = mhd_files[:_CAP]
+            timestamps = timestamps[:_CAP]
+            N = _CAP
+            duration_s = (timestamps[-1] - timestamps[0]) / 1000.0
+            fps = (N - 1) / max(duration_s, 1e-6)
+            print(f'[pulse] CarotidArtery capped to {N} frames  duration={duration_s:.1f}s  fps={fps:.1f}')
+        else:
+            print(f'[pulse] processing {N} frames  duration={duration_s:.1f}s  fps={fps:.1f}')
 
         # Step 2 — Load + ORT inference on all frames (~9 ms/frame vs ~1.7 s with FAST)
         loop = asyncio.get_running_loop()
@@ -448,7 +539,7 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
 
         # Steps 3–8 — Post-loop computation offloaded to executor
         results = await loop.run_in_executor(
-            None, _compute_pulse_results, raw_frames, prob_maps, N, duration_s, fps
+            None, _compute_pulse_results, raw_frames, prob_maps, N, duration_s, fps, anatomy_label
         )
 
         # Done event — metadata only (no frame pixel data)
@@ -467,7 +558,7 @@ async def analyze_pulse(sequence_dir: str = Form(...)):
         payload = {
             'done': True,
             'mode': 'pulse',
-            'anatomy': 'JugularVein',
+            'anatomy': anatomy_label,
             'frame_count': N,
             'fps': round(fps, 2),
             'duration_seconds': round(duration_s, 3),
@@ -549,9 +640,23 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
                 arrays.append(arr * slope + intercept)
             vol_hu = np.stack(arrays, axis=0)  # (N, 512, 512)
 
+            # ── DIAGNOSTIC: raw HU values before windowing ────────────────
+            print(f"[DIAG HU] shape={vol_hu.shape} dtype={vol_hu.dtype}")
+            print(f"[DIAG HU] raw min={vol_hu.min():.1f}  max={vol_hu.max():.1f}  mean={vol_hu.mean():.1f}")
+            first_ds = slices_meta[0][2]
+            print(f"[DIAG HU] first slice RescaleSlope={getattr(first_ds,'RescaleSlope','MISSING')}  RescaleIntercept={getattr(first_ds,'RescaleIntercept','MISSING')}")
+            # ─────────────────────────────────────────────────────────────
+
             window_w, level = 1500, -600
             lo = level - window_w / 2
             vol_norm = np.clip((vol_hu - lo) / window_w, 0.0, 1.0).astype(np.float32)
+
+            # ── DIAGNOSTIC: normalized values after windowing ─────────────
+            pct_above_03 = float((vol_norm > 0.3).sum()) / vol_norm.size * 100
+            print(f"[DIAG NORM] min={vol_norm.min():.4f}  max={vol_norm.max():.4f}  mean={vol_norm.mean():.4f}")
+            print(f"[DIAG NORM] lo={lo:.1f}  window={window_w}  % above 0.3: {pct_above_03:.1f}%")
+            # ─────────────────────────────────────────────────────────────
+
             del vol_hu  # free ~305 MB
             return vol_norm, n
 
@@ -639,13 +744,13 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
             _, buf = cv2.imencode('.jpg', sl_u8, [cv2.IMWRITE_JPEG_QUALITY, 80])
             nodule_slices_b64.append(base64.b64encode(buf.tobytes()).decode())
 
-        del volume_norm  # free memory after gallery encoding
-
-        # Step 5 — Downsample probability volume + build final SSE payload
+        # Step 5 — Downsample probability + lung intensity volumes for frontend
         step_z = max(1, N // 64)  # e.g. 305//64 = 4
         step_y = 4                 # 256//64 = 4
         step_x = 4
         prob_ds = prob_volume[::step_z, ::step_y, ::step_x][:64, :64, :64]
+        lung_ds = volume_norm[::step_z, ::step_y, ::step_x][:64, :64, :64]
+        del volume_norm  # free memory after downsampling
 
         rep_b64 = nodule_slices_b64[2]  # middle of 5 gallery slices
 
@@ -658,6 +763,7 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
             'xy_spacing_mm': 0.732422,
             'nodule_components': components,
             'probability_volume': prob_ds.ravel().tolist(),
+            'lung_intensity_volume': lung_ds.ravel().tolist(),
             'volume_shape': list(prob_ds.shape),
             'representative_slice_b64': rep_b64,
             'nodule_slices_b64': nodule_slices_b64,
@@ -665,6 +771,13 @@ async def analyze_nodule(ct_volume_dir: str = Form(...)):
             'has_ct_volume': True,
             'inference_time_ms': inference_time_ms,
         }
+        # ── DIAGNOSTIC: confirm lung_intensity_volume before sending ─────────
+        print(f"[DIAG] lung_ds shape={lung_ds.shape} dtype={lung_ds.dtype} min={lung_ds.min():.4f} max={lung_ds.max():.4f}")
+        print(f"[DIAG] lung_ds first 10 flat: {lung_ds.ravel()[:10].tolist()}")
+        print(f"[DIAG] prob_ds shape={prob_ds.shape} dtype={prob_ds.dtype} min={prob_ds.min():.4f} max={prob_ds.max():.4f}")
+        print(f"[DIAG] payload keys: {list(payload.keys())}")
+        print(f"[DIAG] lung_intensity_volume length in payload: {len(payload['lung_intensity_volume'])}")
+        # ─────────────────────────────────────────────────────────────────────
         yield f"data: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(

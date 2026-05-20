@@ -4,6 +4,7 @@ from pathlib import Path
 
 import fast
 import numpy as np
+import pydicom
 
 fast.Config.setTestDataPath('/Users/ronith/Documents/Projects/ultrasound/FAST/data/')
 
@@ -131,8 +132,14 @@ def load(filepath: str):
         return frames, {'format': fmt, 'anatomy': anatomy, 'dimensionality': '2D_sequence'}
 
     if fmt == 'dicom':
-        streamer = fast.DICOMMultiFrameStreamer.create(path, loop=False, grayscale=True, cropToROI=False)
-        frames = [np.asarray(f) for f in fast.DataStream(streamer)]
-        return frames, {'format': fmt, 'anatomy': anatomy, 'dimensionality': '2D_sequence'}
+        ds = pydicom.dcmread(path)
+        arr = ds.pixel_array.astype(np.float32)
+        intercept = float(getattr(ds, 'RescaleIntercept', 0))
+        slope = float(getattr(ds, 'RescaleSlope', 1))
+        arr = arr * slope + intercept
+        # CT lung window: W=1500 L=-600
+        lo = -600 - 1500 / 2
+        arr_u8 = (np.clip((arr - lo) / 1500, 0.0, 1.0) * 255).astype(np.uint8)[..., np.newaxis]
+        return arr_u8, {'format': fmt, 'anatomy': anatomy, 'dimensionality': '2D_single'}
 
     raise ValueError(f'Unsupported format for: {path}')
