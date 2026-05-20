@@ -1587,6 +1587,9 @@ function showModeSelect(data) {
   const pulseOk = data.has_sequence && vascularAnatomies.includes(data.anatomy);
   pulseCard.classList.toggle('mode-card--disabled', !pulseOk);
   pulseBtn.disabled = !pulseOk;
+  if (!pulseOk) {
+    pulseDisabledLabel.textContent = 'Pulse analysis requires JugularVein or CarotidArtery sequential data';
+  }
   pulseDisabledLabel.style.display = pulseOk ? 'none' : 'block';
 
   // CT Nodule
@@ -3710,7 +3713,7 @@ function renderNoduleViz(data) {
   const planeMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, opacity: 0.15, transparent: true, side: THREE.DoubleSide });
   _noduleSlicePlane = new THREE.Mesh(planeGeo, planeMat);
   _noduleSlicePlane.rotation.x = -Math.PI / 2;
-  _noduleSlicePlane.position.set(32 * voxW, 0, rep_z_world);
+  _noduleSlicePlane.position.set(32 * voxW, 32 * voxH, rep_z_world);
   scene.add(_noduleSlicePlane);
 
   // ── OrbitControls ──────────────────────────────────────────────────────────
@@ -3781,7 +3784,63 @@ function renderNoduleViz(data) {
     axisCam.translateZ(2);
     axisRend.render(axisScene, axisCam);
   }
-  animate();
+
+  // ── 3-phase entrance animation ─────────────────────────────────────────────
+  const animStart = performance.now();
+  const PHASE1_MS = 800;  // cloud opacity: 0 → 0.08
+  const PHASE2_MS = 600;  // nodule mesh.count: 0 → full
+  const PHASE3_MS = 400;  // nodule scale: 1.0 → 1.08 → 1.0
+
+  // Start cloud at 0 opacity
+  if (_noduleCloudMesh) _noduleCloudMesh.material.opacity = 0;
+
+  // Store full counts for phase 2
+  const fullCounts = _noduleMeshes.map(m => m.count);
+  _noduleMeshes.forEach(m => { m.count = 0; });
+
+  function animateEntrance() {
+    const now = performance.now();
+    const elapsed = now - animStart;
+
+    // Phase 1: cloud fade in
+    if (_noduleCloudMesh) {
+      _noduleCloudMesh.material.opacity = Math.min(elapsed / PHASE1_MS, 1.0) * 0.08;
+    }
+
+    // Phase 2: nodule reveal (starts at 200ms into phase 1)
+    const phase2Elapsed = Math.max(0, elapsed - 200);
+    _noduleMeshes.forEach((m, i) => {
+      const t = Math.min(phase2Elapsed / PHASE2_MS, 1.0);
+      m.count = Math.ceil(fullCounts[i] * t);
+      if (m.count === 0 && fullCounts[i] > 0) m.count = 1;  // show at least 1 immediately
+    });
+
+    // Phase 3: scale pulse (after phase 1 + phase 2)
+    const phase3Start = PHASE1_MS;
+    const phase3Elapsed = Math.max(0, elapsed - phase3Start);
+    if (phase3Elapsed < PHASE3_MS) {
+      const t = phase3Elapsed / PHASE3_MS;
+      // 0→0.5: scale up to 1.08; 0.5→1: scale back to 1.0
+      const scale = t < 0.5 ? 1.0 + 0.08 * (t / 0.5) : 1.08 - 0.08 * ((t - 0.5) / 0.5);
+      _noduleMeshes.forEach(m => { m.scale.setScalar(scale); });
+    } else {
+      _noduleMeshes.forEach(m => { m.scale.setScalar(1.0); });
+    }
+
+    renderer.render(scene, camera);
+    controls.update();
+
+    const totalDuration = Math.max(PHASE1_MS, 200 + PHASE2_MS) + PHASE3_MS;
+    if (elapsed < totalDuration) {
+      _animId = requestAnimationFrame(animateEntrance);
+    } else {
+      // Start regular loop
+      animate();
+    }
+  }
+
+  // Start entrance
+  _animId = requestAnimationFrame(animateEntrance);
 }
 
 function updateNoduleSliceLabel(gz, data) {
@@ -3795,7 +3854,7 @@ function setupNoduleControls(data) {
   slider.max = data.slice_count - 1;
   slider.value = data.gallery_z_indices[2];
   updateNoduleSliceLabel(parseInt(slider.value), data);
-  slider.addEventListener('input', () => {
+  slider.oninput = () => {
     const gz = parseInt(slider.value);
     updateNoduleSliceLabel(gz, data);
     if (_noduleSlicePlane) {
@@ -3803,34 +3862,34 @@ function setupNoduleControls(data) {
       const voxD = data.z_spacing_mm * (data.slice_count / 64);
       _noduleSlicePlane.position.z = (gz / zFactor) * voxD;
     }
-  });
+  };
 
   const opSlider = document.getElementById('nodule-opacity');
-  opSlider.addEventListener('input', () => {
+  opSlider.oninput = () => {
     const op = parseInt(opSlider.value) / 100;
     document.getElementById('nodule-opacity-val').textContent = opSlider.value + '%';
     if (_noduleCloudMesh) _noduleCloudMesh.material.opacity = op;
-  });
+  };
 
-  document.getElementById('nodule-isolate-btn').addEventListener('click', function() {
+  document.getElementById('nodule-isolate-btn').onclick = function() {
     _noduleIsolated = !_noduleIsolated;
     this.classList.toggle('active', _noduleIsolated);
     if (_noduleCloudMesh) _noduleCloudMesh.visible = !_noduleIsolated;
-  });
+  };
 
   document.querySelectorAll('[data-nodule-preset]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.onclick = () => {
       document.querySelectorAll('[data-nodule-preset]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       applyNodulePreset(btn.dataset.nodulePreset);
-    });
+    };
   });
 
-  document.getElementById('nodule-back-link').addEventListener('click', (e) => {
+  document.getElementById('nodule-back-link').onclick = (e) => {
     e.preventDefault();
     teardownThree();
     showState('mode_select');
-  });
+  };
 }
 
 function applyNodulePreset(preset) {
